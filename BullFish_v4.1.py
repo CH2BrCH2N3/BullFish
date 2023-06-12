@@ -171,7 +171,7 @@ if spine_analysis:
         elif x1 == x2 and y1 == y2:
             print('cal_direction_Error')
             return Decimal(0)
-        inclin = str(math.atan((y1 - y2) / (x1 - x2)))
+        inclin = math.atan((y1 - y2) / (x1 - x2))
         if x1 > x2:
             return Decimal(inclin)
         elif x1 < x2 and y1 >= y2:
@@ -220,7 +220,7 @@ if spine_analysis:
     find_sdist(1, l)
     find_bl(0, l)
 
-    direction = [cal_direction(spine[i][1], spine[i][2], spine[i][3], spine[i][4]) for i in range(l)] 
+    direction = [cal_direction(spine[i][1], spine[i][2], spine[i][3], spine[i][4]) for i in range(l)]
 
     turn = [0]
     for i in range(1, l):
@@ -365,6 +365,7 @@ if spine_analysis:
     inv_timepts_len = len(inv_timepts)
     if inv_timepts_len % 2 == 1:
         inv_timepts.append(l)
+    inv_timepts_len = len(inv_timepts)
     
     sdinvcheck = []
     for i in range(inv_timepts_len):
@@ -397,7 +398,13 @@ if spine_analysis:
                 break
             find_sdist(inv_timepts[i + 1], inv_timepts[i + 1] + 1)
             i += 2
-
+        
+        for i in range(l):
+            direction[i] = cal_direction(spine[i][1], spine[i][2], spine[i][3], spine[i][4])
+        for i in range(1, l):
+            turn[i] = cal_turn(direction[i - 1], direction[i])
+        turn_avg = runavg(turn, 1, l)
+        
     for i in range(1, l):
         if bl[0][i] < spine_cutoff:
             status[i] = 8
@@ -435,9 +442,9 @@ if spine_analysis:
                     angle_change[k][j] = angle[k][j] - angle[k][j - 1]
                 i = j
             i += 1
-        '''
+        
         for i in range(1, l - 1): #adjust for single frame errors
-            if turn[i] >= pi / 2 or angle[0][i] - angle[0][i - 1] >= pi / 2:
+            if turn[i] > pi / 4:
                 for j in range(1, 15):
                     spine[i][j] = (spine[i - 1][j] + spine[i + 1][j]) / 2
                 find_sdist(i, i + 2)
@@ -446,7 +453,7 @@ if spine_analysis:
                 turn[i] = cal_turn(direction[i - 1], direction[i])
                 turn[i + 1] = cal_turn(direction[i], direction[i + 1])
                 cal_angle(i)
-        '''
+        
         turn_avg = runavg(turn, 1, l)
         headtotail_angle_avg = runavg(angle[0], 0, l)
         total_abs_angle_avg = runavg(angle[6], 0, l)
