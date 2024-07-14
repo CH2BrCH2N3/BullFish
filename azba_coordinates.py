@@ -10,7 +10,7 @@ for j in range(50, 450):
     for i in range(60, 900):
         for k in range(86, 590):
             brain[j][i][k] = int(data[j][i][k])
-brain_regions = [[0 for j in range(9)] for i in range(203)]
+brain_regions = [[0 for j in range(11)] for i in range(203)]
 for i in range(198):
     brain_regions[i][0] = i + 1
 brain_regions[198][0] = 900
@@ -62,6 +62,8 @@ for i in range(60, 900):
                     brain_regions[brain_region][7] += i
                     brain_regions[brain_region][8] += k
 for i in range(203):
+    brain_regions[i][9] = Decimal(brain_regions[i][3] + brain_regions[i][7]) / Decimal(brain_regions[i][1] + brain_regions[i][5])
+    brain_regions[i][10] = Decimal(brain_regions[i][2] + brain_regions[i][6]) / Decimal(brain_regions[i][1] + brain_regions[i][5])
     brain_regions[i][2] = Decimal(brain_regions[i][2]) / Decimal(brain_regions[i][1])
     brain_regions[i][3] = Decimal(brain_regions[i][3]) / Decimal(brain_regions[i][1])
     brain_regions[i][4] = Decimal(brain_regions[i][4]) / Decimal(brain_regions[i][1])
@@ -78,7 +80,7 @@ with open('Zebrafish_Brain_Atlas.csv', 'w') as f:
             f.write(str(brain_regions[i][j]) + ', ')
         f.write('\n')
 with open('Zebrafish_Brain_Stereotactic_Atlas.csv', 'w') as f:
-    header = ['Region', 'Left Volume', 'Left DV', 'Left AP', 'Left ML', 'Right Volume', 'Right DV', 'Right AP', 'Right ML']
+    header = ['Region', 'Left Volume', 'Left ML', 'Left AP', 'Left DV', 'Right Volume', 'Right ML', 'Right AP', 'Right DV', 'Central AP', 'Central DV']
     for word in header:
         f.write(word + ', ')
     f.write('\n')
@@ -91,7 +93,7 @@ with open('Zebrafish_Brain_Stereotactic_Atlas.csv', 'w') as f:
                 surface = j
                 break
         rounded_dv = round(brain_regions[i][2]) - surface
-        row = [brain_regions[i][0], brain_regions[i][1] * 64, (rounded_ml - 335) * 4, (356 - rounded_ap) * 4, rounded_dv * 4]
+        row = [brain_regions[i][0], brain_regions[i][1] * 64, (rounded_ml - 335) * 4, (370 - rounded_ap) * 4, rounded_dv * 4]
         for item in row:
             f.write(str(item) + ', ')
         rounded_ap = round(brain_regions[i][7])
@@ -102,7 +104,17 @@ with open('Zebrafish_Brain_Stereotactic_Atlas.csv', 'w') as f:
                 surface = j
                 break
         rounded_dv = round(brain_regions[i][6]) - surface
-        row = [brain_regions[i][5] * 64, (rounded_ml - 335) * 4, (356 - rounded_ap) * 4, rounded_dv * 4]
+        row = [brain_regions[i][5] * 64, (rounded_ml - 335) * 4, (370 - rounded_ap) * 4, rounded_dv * 4]
+        for item in row:
+            f.write(str(item) + ', ')
+        rounded_ap = round(brain_regions[i][9])
+        surface = 0
+        for j in range(50, 450):
+            if brain[j][rounded_ap][335] != 0:
+                surface = j
+                break
+        rounded_dv = round(brain_regions[i][10]) - surface
+        row = [(370 - rounded_ap) * 4, rounded_dv * 4]
         for item in row:
             f.write(str(item) + ', ')
         f.write('\n')
