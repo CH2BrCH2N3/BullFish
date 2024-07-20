@@ -1,7 +1,5 @@
 import nibabel as nib
 from decimal import Decimal
-import time
-stime = time.time()
 seg = nib.load('2021-08-22_AZBA_segmentation.nii.gz')
 depth, length, width = seg.shape
 data = seg.get_fdata()
@@ -71,12 +69,12 @@ for i in range(203):
     brain_regions[i][7] = Decimal(brain_regions[i][7]) / Decimal(brain_regions[i][5])
     brain_regions[i][8] = Decimal(brain_regions[i][8]) / Decimal(brain_regions[i][5])
 with open('Zebrafish_Brain_Atlas.csv', 'w') as f:
-    header = ['Region', 'Left Volume', 'Left DV', 'Left AP', 'Left ML', 'Right Volume', 'Right DV', 'Right AP', 'Right ML']
+    header = ['Region', 'Left Volume', 'Left DV', 'Left AP', 'Left ML', 'Right Volume', 'Right DV', 'Right AP', 'Right ML', 'Central AP', 'Central DV']
     for word in header:
         f.write(word + ', ')
     f.write('\n')
     for i in range(203):
-        for j in range(9):
+        for j in range(11):
             f.write(str(brain_regions[i][j]) + ', ')
         f.write('\n')
 with open('Zebrafish_Brain_Stereotactic_Atlas.csv', 'w') as f:
@@ -118,5 +116,3 @@ with open('Zebrafish_Brain_Stereotactic_Atlas.csv', 'w') as f:
         for item in row:
             f.write(str(item) + ', ')
         f.write('\n')
-etime = time.time()
-print(etime - stime)
