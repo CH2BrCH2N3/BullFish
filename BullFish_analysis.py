@@ -1,13 +1,11 @@
 import os
 import csv
+import scipy.signal
 import matplotlib.pyplot as plt
 import math
 from decimal import Decimal
 from statistics import median
 pi = Decimal(math.pi)
-
-import cv2 as cv
-import numpy as np
 
 if not os.path.exists('bullfish_analysis_settings.csv'):
     with open('bullfish_analysis_settings.csv', 'w') as f:
@@ -70,197 +68,48 @@ def cal_preference(p, n):
         return 0
 
 class peak_data:
-    def __init__(self, pos, length, maxima, auc):
-        self.pos = pos
+    
+    def __init__(self, start=0, length=0, end=0, peakpos=0, uplength=0,
+                 height=0, upheight=0, auc=0, maxslope=0, maxslopepos=0):
+        self.start = start
         self.length = length
-        self.maxima = maxima
+        self.end = end
+        self.peakpos = peakpos
+        self.uplength = uplength
+        self.height = height
+        self.upheight = upheight
         self.auc = auc
+        self.maxslope = maxslope
+        self.maxslopepos = maxslopepos
 
 class peak_analysis:
     
-    def __init__(self, inputlist):
+    def __init__(self, inputlist, window=0, start=0, end=0):
+        
         self.original_list = inputlist
-        self.list = inputlist
-    
-    def downsampling(self, factor):
-        list_len = len(self.list)
-        for i in range(0, list_len - factor, factor):
-            for j in range(i + 1, i + factor):
-                self.list[j] = (self.list[i] * (i + factor - j) + self.list[i + factor] * (j - i)) / factor
-        for i in range(list_len - factor + 1, list_len - 1):
-            self.list[i] = (self.list[list_len - factor] * (list_len - 1 - i) + self.list[list_len - 1] * (i - (list_len - factor))) / (list_len - 1 - (list_len - factor))
-    
-    def runavg(self, start, end, window):
-
-        temp_list = self.original_list[start:end]
-        self.list = [0 for i in range(end)]
-        for i in range(window // 2):
-            temp_list.insert(0, self.original_list[start])
-        for i in range(window // 2):
-            temp_list.append(self.original_list[end - 1])
-        for i in range(start, end):
-            self.list[i] = sum(temp_list[(i - start):(i - start + window)]) / window
-            
-        self.positive_list = [(item if item > 0 else 0) for item in self.list]
-        self.negative_list = [(-item if item < 0 else 0) for item in self.list]
-    
-    def find_peaks(self, positive_cutoff, negative_cutoff, criteria):
         
-        self.positive_peaks = []
-        i = 1
-        while i < l:
-            if self.positive_list[i] > positive_cutoff:
-                j = i
-                maxima = 0
-                auc = 0
-                while j < l and self.positive_list[j] > positive_cutoff:
-                    auc += self.positive_list[j]
-                    if self.positive_list[j] > maxima:
-                        maxima = self.positive_list[j]
-                    j += 1
-                if j >= l:
-                    break
-                auc = auc / fps
-                self.positive_peaks.append(peak_data(i, j - i, maxima, auc))
-                i = j
-            i += 1
+        if window > 2:
+            temp_list = self.original_list[start:end]
+            self.list = [0 for i in range(end)]
+            for i in range(window // 2):
+                temp_list.insert(0, self.original_list[start])
+            for i in range(window // 2):
+                temp_list.append(self.original_list[end - 1])
+            for i in range(start, end):
+                self.list[i] = sum(temp_list[(i - start):(i - start + window)]) / window
+        else:
+            self.list = list(inputlist)
         
         i = 0
-        while i < len(self.positive_peaks):
-            if (self.positive_peaks[i].length < criteria.length
-                or self.positive_peaks[i].maxima < criteria.maxima
-                or self.positive_peaks[i].auc < criteria.auc):
-                self.positive_peaks.pop(i)
-                i -= 1
-            i += 1
-        
-        self.positive_count = len(self.positive_peaks)
-        self.positive_length_sum = sum((self.positive_peaks[i].length for i in range(self.positive_count)))
-        self.positive_length_mean = self.positive_length_sum / Decimal(self.positive_count) if self.positive_count > 0 else 0
-        self.positive_length_max = max((self.positive_peaks[i].length for i in range(self.positive_count))) if self.positive_count > 0 else 0
-        self.positive_maxima_sum = sum((self.positive_peaks[i].maxima for i in range(self.positive_count)))
-        self.positive_maxima_mean = self.positive_maxima_sum / Decimal(self.positive_count) if self.positive_count > 0 else 0
-        self.positive_maxima_max = max((self.positive_peaks[i].maxima for i in range(self.positive_count))) if self.positive_count > 0 else 0
-        self.positive_auc_sum = sum((self.positive_peaks[i].auc for i in range(self.positive_count)))
-        self.positive_auc_mean = self.positive_auc_sum / Decimal(self.positive_count) if self.positive_count > 0 else 0
-        self.positive_auc_max = max((self.positive_peaks[i].auc for i in range(self.positive_count))) if self.positive_count > 0 else 0
-        
-        self.negative_peaks = []
-        i = 1
-        while i < l:
-            if self.negative_list[i] > negative_cutoff:
-                j = i
-                maxima = 0
-                auc = 0
-                while j < l and self.negative_list[j] > negative_cutoff:
-                    auc += self.negative_list[j]
-                    if self.negative_list[j] > maxima:
-                        maxima = self.negative_list[j]
-                    j += 1
-                if j >= l:
-                    break
-                auc = auc / fps
-                self.negative_peaks.append(peak_data(i, j - i, maxima, auc))
-                i = j
-            i += 1
-        
-        i = 0
-        while i < len(self.negative_peaks):
-            if (self.negative_peaks[i].length < criteria.length
-                or self.negative_peaks[i].maxima < criteria.maxima
-                or self.negative_peaks[i].auc < criteria.auc):
-                self.negative_peaks.pop(i)
-                i -= 1
-            i += 1
-        
-        self.negative_count = len(self.negative_peaks)
-        self.negative_length_sum = sum((self.negative_peaks[i].length for i in range(self.negative_count)))
-        self.negative_length_mean = self.negative_length_sum / Decimal(self.negative_count) if self.negative_count > 0 else 0
-        self.negative_length_max = max((self.negative_peaks[i].length for i in range(self.negative_count))) if self.negative_count > 0 else 0
-        self.negative_maxima_sum = sum((self.negative_peaks[i].maxima for i in range(self.negative_count)))
-        self.negative_maxima_mean = self.negative_maxima_sum / Decimal(self.negative_count) if self.negative_count > 0 else 0
-        self.negative_maxima_max = max((self.negative_peaks[i].maxima for i in range(self.negative_count))) if self.negative_count > 0 else 0
-        self.negative_auc_sum = sum((self.negative_peaks[i].auc for i in range(self.negative_count)))
-        self.negative_auc_mean = self.negative_auc_sum / Decimal(self.negative_count) if self.negative_count > 0 else 0
-        self.negative_auc_max = max((self.negative_peaks[i].auc for i in range(self.negative_count))) if self.negative_count > 0 else 0
-        
-        self.count = self.positive_count + self.negative_count
-        self.length_sum = self.positive_length_sum + self.negative_length_sum
-        self.length_mean = self.length_sum / Decimal(self.count) if self.count > 0 else 0
-        self.length_max = max(self.positive_length_max, self.negative_length_max)
-        self.maxima_sum = self.positive_maxima_sum + self.negative_maxima_sum
-        self.maxima_mean = self.maxima_sum / Decimal(self.count) if self.count > 0 else 0
-        self.maxima_max = max(self.positive_maxima_max, self.negative_maxima_max)
-        self.auc_sum = self.positive_auc_sum + self.negative_auc_sum
-        self.auc_mean = self.auc_sum / Decimal(self.count) if self.count > 0 else 0
-        self.auc_max = max(self.positive_auc_max, self.negative_auc_max)
-        
-        self.peaks = [0 for i in range(self.count)]
-        i = 0
-        pi = 0
-        ni = 0
-        while i < self.count:
-            if pi >= self.positive_count:
-                self.peaks[i] = self.negative_peaks[ni]
-                self.peaks[i].maxima = -self.peaks[i].maxima
-                self.peaks[i].auc = -self.peaks[i].auc
-                ni += 1
-                i += 1
-                continue
-            if ni >= self.negative_count:
-                self.peaks[i] = self.positive_peaks[pi]
-                pi += 1
-                i += 1
-                continue
-            if self.positive_peaks[pi].pos < self.negative_peaks[ni].pos:
-                self.peaks[i] = self.positive_peaks[pi]
-                pi += 1
+        while i < end:
+            if self.list[i] == 0:
+                self.list[i] = self.list[start]
                 i += 1
             else:
-                self.peaks[i] = self.negative_peaks[ni]
-                self.peaks[i].maxima = -self.peaks[i].maxima
-                self.peaks[i].auc = -self.peaks[i].auc
-                ni += 1
-                i += 1
+                break
         
-        '''
-        self.count_a = 0
-        self.length_sum_a = 0
-        self.height_sum_a = 0
-        self.maxslope_sum_a = 0
-        for i in range(self.count):
-            if self.peaks[i].freeze == 0:
-                self.count_a += 1
-                self.length_sum_a += self.peaks[i].length
-                self.height_sum_a += self.peaks[i].height
-                self.maxslope_sum_a += self.peaks[i].maxslope
-        self.length_mean_a = self.length_sum_a / Decimal(self.count_a) if self.count_a > 0 else 0
-        self.height_mean_a = self.height_sum_a / Decimal(self.count_a) if self.count_a > 0 else 0
-        self.maxslope_mean_a = self.maxslope_sum_a / Decimal(self.count_a) if self.count_a > 0 else 0
-        '''
-    def write_peaks(self, name):
-        with open(name, 'w') as f:
-            for word in ['pos', 'length', 'maxima', 'auc']:
-                f.write(word + ', ')
-            f.write('\n')
-            for i in range(self.count):
-                data = [str(self.peaks[i].pos), str(self.peaks[i].length),
-                        str(self.peaks[i].maxima), str(self.peaks[i].auc)]
-                for datum in data:
-                    f.write(datum + ', ')
-                f.write('\n')
-    
-    def plot_peaks(self, axes, list_toplot, color_list, color_positive_peak, color_negative_peak, factor=1):
-        for item in list_toplot:
-            item *= Decimal(factor)
-        if color_list != None:
-            axes.plot(list_toplot, color=color_list)
-        if color_positive_peak != None:
-            for peak in self.positive_peaks:
-                axes.plot([i for i in range(peak.pos, peak.pos + peak.length)], list_toplot[peak.pos:(peak.pos + peak.length)], color=color_positive_peak)
-        if color_negative_peak != None:
-            for peak in self.negative_peaks:
-                axes.plot([i for i in range(peak.pos, peak.pos + peak.length)], list_toplot[peak.pos:(peak.pos + peak.length)], color=color_negative_peak)
+        self.p_list = [(item if item > 0 else 0) for item in self.list]
+        self.n_list = [(-item if item < 0 else 0) for item in self.list]
         
 for file in os.listdir('.'):
      
@@ -293,25 +142,29 @@ for file in os.listdir('.'):
         fish_lengths = [cell for cell in csv.reader(f)]
     fish_length = median([Decimal(length[0]) for length in fish_lengths])
     
-    #annotated = cv.VideoWriter(path + '/' + videoname + '_aa.avi', cv.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (200, 700), 0)
-    
     with open(path + '/' + videoname + '_cen.csv', 'r') as f:
         cen = [[cell for cell in row] for row in csv.reader(f)]
         cen.pop(0)
         for i in range(l):
             cen[i] = (Decimal(cen[i][0]) * ratio, Decimal(cen[i][1]) * ratio)
     
-    cdists = [0 for i in range(l)]
+    sampling = 2
+    cen_dists = [0 for i in range(l)]
     speeds = [0 for i in range(l)]
-    for i in range(1, l):
-        cdists[i] = pyth(cen[i], cen[i - 1])
-        speeds[i] = cdists[i] * fps
-    total_distance = sum(cdists)
+    for i in range(sampling, l, sampling):
+        cen_dists[i] = pyth(cen[i], cen[i - sampling]) / Decimal(sampling)
+        speeds[i] = cen_dists[i] * fps
+    for i in range(0, sampling):
+        cen_dists[i] = cen_dists[sampling]
+    for i in range(sampling * 2, l, sampling):
+        for j in range(i - sampling + 1, i):
+            cen_dists[j] = (cen_dists[i - sampling] * (i - j) + cen_dists[i] * (j - (i - sampling))) / Decimal(sampling)
+            speeds[j] = cen_dists[j] * fps
+    total_distance = sum(cen_dists)
     total_time = Decimal(l) / fps
     speed_avg = total_distance / total_time
     
-    speeds = peak_analysis(speeds)
-    speeds.runavg(1, l, 5)
+    speeds = peak_analysis(speeds, window=5, start=1, end=l)
     max_speed = max(speeds.list)
 
     freeze = [0 for i in range(l)]
@@ -340,7 +193,7 @@ for file in os.listdir('.'):
     for i in range(1, l):
         start = max(1, round(i + 1 - fps / 2))
         end = min(l, round(i + 1 + fps / 2))
-        cdist1s[i] = sum((cdists[j] for j in range(start, end))) * fps / Decimal(end - start)
+        cdist1s[i] = sum((cen_dists[j] for j in range(start, end))) * fps / Decimal(end - start)
     max_distance_1s = max(cdist1s)
     
     analysis = {
@@ -354,32 +207,63 @@ for file in os.listdir('.'):
     }
     
     accels = [0 for i in range(l)]
-    for i in range(2, l):
-        accels[i] = (speeds.list[i] - speeds.list[i - 1]) * fps
+    for i in range(1, l):
+        accels[i] = (speeds.p_list[i] - speeds.p_list[i - 1]) * fps
+    accels[0] = accels[1]
+    accels = peak_analysis(accels, window=5, start=1, end=l)
+    accels_peaks, _ = scipy.signal.find_peaks(accels.p_list, prominence=100)
     
-    accel_criteria = peak_data(0, accel_min_dur * fps, accel_min_maxima, accel_min_auc)
-    accels = peak_analysis(accels)
-    accels.runavg(2, l, 5)
-    accels.find_peaks(accel_cutoff, 99999999, accel_criteria)
-    accels.write_peaks(path + '/' + videoname + '_accel_peaks_data.csv')
+    fig, ax = plt.subplots()
+    ax.plot(accels.p_list)
+    scatter_x = accels_peaks
+    scatter_y = [accels.p_list[i] for i in accels_peaks]
+    ax.scatter(scatter_x, scatter_y, marker='x')
     
-    accels_freq = Decimal(accels.positive_count) / total_time
-    accels_mean_dur = Decimal(accels.positive_length_mean) / fps
-    accels_mean_maxima = accels.positive_maxima_mean
-    accels_mean_auc = accels.positive_auc_mean
-    accels_max_dur = Decimal(accels.positive_length_max) / fps
-    accels_max_maxima = accels.positive_maxima_max
-    accels_max_auc = accels.positive_auc_max
+    accels_peak_count = len(accels_peaks)
+    accels_data = [peak_data() for i in range(accels_peak_count)]
+    i = 0
+    while i < accels_peak_count:
+        j = accels_peaks[i]
+        while j > 0:
+            slope = speeds.p_list[j] - speeds.p_list[j - 1]
+            if slope < -0.1:
+                accels_data[i].start = j
+                break
+            j -= 1
+        j = accels_peaks[i]
+        while j < l - 1:
+            slope = speeds.p_list[j + 1] - speeds.p_list[j]
+            if slope < -0.2:
+                accels_data[i].end = j
+                accels_data[i].length = j - accels_data[i].start
+                break
+            j += 1
+        accels_data[i].height = speeds.p_list[accels_data[i].end]
+        accels_data[i].upheight = accels_data[i].height - speeds.p_list[accels_data[i].start]
+        for j in range(accels_data[i].start, accels_data[i].end):
+            slope = speeds.p_list[j + 1] - speeds.p_list[j]
+            if slope > accels_data[i].maxslope:
+                accels_data[i].maxslope = slope
+                accels_data[i].maxslopepos = j
+        i += 1
+    accels_count = len(accels_data)
+    
+    fig, ax = plt.subplots()
+    ax.plot(speeds.p_list)
+    scatter_x = [accels_data[i].start for i in range(accels_count)]
+    scatter_y = [speeds.p_list[accels_data[i].start] for i in range(accels_count)]
+    ax.scatter(scatter_x, scatter_y, c='r', marker='^')
+    scatter_x = [accels_data[i].end for i in range(accels_count)]
+    scatter_y = [speeds.p_list[accels_data[i].end] for i in range(accels_count)]
+    ax.scatter(scatter_x, scatter_y, c='g', marker='v')
+    scatter_x = [accels_data[i].maxslopepos for i in range(accels_count)]
+    scatter_y = [speeds.p_list[accels_data[i].maxslopepos] for i in range(accels_count)]
+    ax.scatter(scatter_x, scatter_y, c='y', marker='o')
+    '''
     analysis.update({
-        'accels_freq': accels_freq,
-        'accels_mean_dur': accels_mean_dur,
-        'accels_mean_maxima': accels_mean_maxima,
-        'accels_mean_auc': accels_mean_auc,
-        'accels_max_dur': accels_max_dur,
-        'accels_max_maxima': accels_max_maxima,
-        'accels_max_auc': accels_max_auc
-    })
         
+    })
+    '''
     if spine_analysis:
         
         spine_lens = [0 for i in range(l)]
@@ -467,6 +351,261 @@ for file in os.listdir('.'):
                 trunk_curvs_filtered[i] = trunk_curvs[i]
             total_curvs_filtered[i] = trunk_curvs_filtered[i] + abs(cal_direction_change(spine_dirs[0], tail_dir))
         
+        turns = peak_analysis(turns, window=5, start=1, end=l)
+        sampling = 4
+        turns_filtered = [0 for i in range(l)]
+        for i in range(sampling, l, sampling):
+            turns_filtered[i] = cal_direction_change(directions[i - sampling], directions[i]) * fps / Decimal(sampling)
+        for i in range(0, sampling):
+            turns_filtered[i] = turns_filtered[sampling]
+        for i in range(sampling * 2, l, sampling):
+            for j in range(i - sampling + 1, i):
+                turns_filtered[j] = (turns_filtered[i - sampling] * (i - j) + turns_filtered[i] * (j - (i - sampling))) / Decimal(sampling)
+        turns_filtered = peak_analysis(turns_filtered, window=5, start=sampling, end=l)
+        
+        turns_p_peaks, _ = scipy.signal.find_peaks(turns.p_list, prominence=3)
+        turns_p_peak_count = len(turns_p_peaks)
+        turns_p_data = [peak_data() for i in range(turns_p_peak_count)]
+        i = 0
+        while i < turns_p_peak_count:
+            j = turns_p_peaks[i]
+            turns_p_data[i].peakpos = j
+            turns_p_data[i].height = turns.p_list[j]
+            while j > 0:
+                slope = turns.p_list[j] - turns.p_list[j - 1]
+                if slope < -0.1:
+                    break
+                j -= 1
+            turns_p_data[i].start = j
+            turns_p_data[i].uplength = turns_p_peaks[i] - j
+            turns_p_data[i].upheight = turns_p_data[i].height - turns.p_list[j]
+            j = turns_p_peaks[i]
+            while j < l - 1:
+                slope = turns.p_list[j + 1] - turns.p_list[j]
+                if slope > 0.1:
+                    break
+                j += 1
+            turns_p_data[i].end = j
+            turns_p_data[i].length = j - turns_p_data[i].start
+            for j in range(turns_p_data[i].start, turns_p_peaks[i]):
+                slope = turns.p_list[j + 1] - turns.p_list[j]
+                if slope > turns_p_data[i].maxslope:
+                    turns_p_data[i].maxslope = slope
+                    turns_p_data[i].maxslopepos = j
+            for j in range(turns_p_data[i].start, turns_p_data[i].end + 1):
+                turns_p_data[i].auc += turns.p_list[j]
+            i += 1
+        
+        turns_p_count = len(turns_p_data)
+        turns_n_peaks, _ = scipy.signal.find_peaks(turns.n_list, prominence=3)
+        turns_n_peak_count = len(turns_n_peaks)
+        turns_n_data = [peak_data() for i in range(turns_n_peak_count)]
+        i = 0
+        while i < turns_n_peak_count:
+            j = turns_n_peaks[i]
+            turns_n_data[i].peakpos = j
+            turns_n_data[i].height = turns.n_list[j]
+            while j > 0:
+                slope = turns.n_list[j] - turns.n_list[j - 1]
+                if slope < -0.1:
+                    break
+                j -= 1
+            turns_n_data[i].start = j
+            turns_n_data[i].uplength = turns_n_peaks[i] - j
+            turns_n_data[i].upheight = turns_n_data[i].height - turns.n_list[j]
+            j = turns_n_peaks[i]
+            while j < l - 1:
+                slope = turns.n_list[j + 1] - turns.n_list[j]
+                if slope > 0.1:
+                    break
+                j += 1
+            turns_n_data[i].end = j
+            turns_n_data[i].length = j - turns_n_data[i].start
+            for j in range(turns_n_data[i].start, turns_n_peaks[i]):
+                slope = turns.n_list[j + 1] - turns.n_list[j]
+                if slope > turns_n_data[i].maxslope:
+                    turns_n_data[i].maxslope = slope
+                    turns_n_data[i].maxslopepos = j
+            for j in range(turns_n_data[i].start, turns_n_data[i].end + 1):
+                turns_n_data[i].auc += turns.n_list[j]
+            i += 1
+        
+        turns_n_count = len(turns_n_data)
+        
+        fig, ax = plt.subplots()
+        ax.plot(turns.list)
+        ax.plot(turns_filtered.list, c='g')
+        ax.plot(turns.original_list, c='y')
+        scatter_x = [turns_p_data[i].peakpos for i in range(turns_p_count)]
+        scatter_y = [turns.list[turns_p_data[i].peakpos] for i in range(turns_p_count)]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
+        scatter_x = [turns_p_data[i].start for i in range(turns_p_count)]
+        scatter_y = [turns.list[turns_p_data[i].start] for i in range(turns_p_count)]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='^')
+        scatter_x = [turns_p_data[i].end for i in range(turns_p_count)]
+        scatter_y = [turns.list[turns_p_data[i].end] for i in range(turns_p_count)]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='v')
+        scatter_x = [turns_n_data[i].peakpos for i in range(turns_n_count)]
+        scatter_y = [turns.list[turns_n_data[i].peakpos] for i in range(turns_n_count)]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        scatter_x = [turns_n_data[i].start for i in range(turns_n_count)]
+        scatter_y = [turns.list[turns_n_data[i].start] for i in range(turns_n_count)]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='^')
+        scatter_x = [turns_n_data[i].end for i in range(turns_n_count)]
+        scatter_y = [turns.list[turns_n_data[i].end] for i in range(turns_n_count)]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='v')
+        
+        trunk_angles = peak_analysis(trunk_angles, window=5, start=0, end=l)
+        trunk_angles_p_peaks, _ = scipy.signal.find_peaks(trunk_angles.p_list, prominence=0.05)
+        trunk_angles_p_data = []
+        trunk_angles_n_peaks, _ = scipy.signal.find_peaks(trunk_angles.n_list, prominence=0.05)
+        trunk_angles_n_data = []
+        
+        fig, ax = plt.subplots()
+        ax.plot(trunk_angles.list)
+        scatter_x = trunk_angles_p_peaks
+        scatter_y = [trunk_angles.list[i] for i in trunk_angles_p_peaks]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
+        scatter_x = trunk_angles_n_peaks
+        scatter_y = [trunk_angles.list[i] for i in trunk_angles_n_peaks]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        
+        tail_angles = peak_analysis(tail_angles, window=5, start=0, end=l)
+        tail_angles_p_peaks, _ = scipy.signal.find_peaks(tail_angles.p_list, prominence=0.05)
+        tail_angles_p_data = []
+        tail_angles_n_peaks, _ = scipy.signal.find_peaks(tail_angles.n_list, prominence=0.05)
+        tail_angles_n_data = []
+        
+        fig, ax = plt.subplots()
+        ax.plot(tail_angles.list)
+        scatter_x = tail_angles_p_peaks
+        scatter_y = [tail_angles.list[i] for i in tail_angles_p_peaks]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
+        scatter_x = tail_angles_n_peaks
+        scatter_y = [tail_angles.list[i] for i in tail_angles_n_peaks]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        
+        amplitudes = peak_analysis(amplitudes, window=5, start=0, end=l)
+        amplitudes_p_peaks, _ = scipy.signal.find_peaks(amplitudes.p_list, prominence=0.05)
+        amplitudes_p_data = []
+        amplitudes_n_peaks, _ = scipy.signal.find_peaks(amplitudes.n_list, prominence=0.05)
+        amplitudes_n_data = []
+        
+        fig, ax = plt.subplots()
+        ax.plot(amplitudes.list)
+        scatter_x = amplitudes_p_peaks
+        scatter_y = [amplitudes.list[i] for i in amplitudes_p_peaks]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
+        scatter_x = amplitudes_n_peaks
+        scatter_y = [amplitudes.list[i] for i in amplitudes_n_peaks]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        
+        trunk_curvs_filtered = peak_analysis(trunk_curvs_filtered, window=5, start=0, end=l)
+        trunk_curvs_peaks, _ = scipy.signal.find_peaks(trunk_curvs_filtered.list, prominence=0.05)
+        trunk_curvs_count = len(trunk_curvs_peaks)
+        trunk_curvs_data = [peak_data() for i in range(trunk_curvs_count)]
+        i = 0
+        while i < trunk_curvs_count:
+            j = trunk_curvs_peaks[i]
+            trunk_curvs_data[i].peakpos = j
+            trunk_curvs_data[i].height = trunk_curvs_filtered.list[j]
+            while j > 0:
+                slope = trunk_curvs_filtered.list[j] - trunk_curvs_filtered.list[j - 1]
+                if slope < 0:
+                    break
+                j -= 1
+            trunk_curvs_data[i].start = j
+            trunk_curvs_data[i].upheight = trunk_curvs_data[i].height - trunk_curvs_filtered.list[j]
+            trunk_curvs_data[i].uplength = trunk_curvs_peaks[i] - j
+            j = trunk_curvs_peaks[i]
+            while j < l - 1:
+                slope = trunk_curvs_filtered.list[j + 1] - trunk_curvs_filtered.list[j]
+                if slope > 0:
+                    break
+                j += 1
+            trunk_curvs_data[i].end = j
+            trunk_curvs_data[i].length = j - trunk_curvs_data[i].start
+            for j in range(trunk_curvs_data[i].start, trunk_curvs_data[i].end):
+                slope = trunk_curvs_filtered.list[j + 1] - trunk_curvs_filtered.list[j]
+                if slope > trunk_curvs_data[i].maxslope:
+                    trunk_curvs_data[i].maxslope = slope
+                    trunk_curvs_data[i].maxslopepos = j
+            i += 1
+        i = 0
+        while i < trunk_curvs_count:
+            if trunk_curvs_data[i].upheight < 0.05:
+                trunk_curvs_data.pop(i)
+                i -= 1
+                trunk_curvs_count -= 1
+            i += 1
+        
+        fig, ax = plt.subplots()
+        ax.plot(trunk_curvs_filtered.list)
+        scatter_x = [trunk_curvs_data[i].peakpos for i in range(trunk_curvs_count)]
+        scatter_y = [trunk_curvs_filtered.list[trunk_curvs_data[i].peakpos] for i in range(trunk_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
+        scatter_x = [trunk_curvs_data[i].start for i in range(trunk_curvs_count)]
+        scatter_y = [trunk_curvs_filtered.list[trunk_curvs_data[i].start] for i in range(trunk_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='m', marker='^')
+        scatter_x = [trunk_curvs_data[i].end for i in range(trunk_curvs_count)]
+        scatter_y = [trunk_curvs_filtered.list[trunk_curvs_data[i].end] for i in range(trunk_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='m', marker='v')
+        
+        total_curvs_filtered = peak_analysis(total_curvs_filtered, window=5, start=0, end=l)
+        total_curvs_peaks, _ = scipy.signal.find_peaks(total_curvs_filtered.list, prominence=0.05)
+        total_curvs_count = len(total_curvs_peaks)
+        total_curvs_data = [peak_data() for i in range(total_curvs_count)]
+        i = 0
+        while i < total_curvs_count:
+            j = total_curvs_peaks[i]
+            total_curvs_data[i].peakpos = j
+            total_curvs_data[i].height = total_curvs_filtered.list[j]
+            while j > 0:
+                slope = total_curvs_filtered.list[j] - total_curvs_filtered.list[j - 1]
+                if slope < 0:
+                    break
+                j -= 1
+            total_curvs_data[i].start = j
+            total_curvs_data[i].upheight = total_curvs_data[i].height - total_curvs_filtered.list[j]
+            total_curvs_data[i].uplength = total_curvs_peaks[i] - j
+            j = total_curvs_peaks[i]
+            while j < l - 1:
+                slope = total_curvs_filtered.list[j + 1] - total_curvs_filtered.list[j]
+                if slope > 0:
+                    break
+                j += 1
+            total_curvs_data[i].end = j
+            total_curvs_data[i].length = j - total_curvs_data[i].start
+            for j in range(total_curvs_data[i].start, total_curvs_data[i].end + 1):
+                slope = total_curvs_filtered.list[j + 1] - total_curvs_filtered.list[j]
+                if slope > total_curvs_data[i].maxslope:
+                    total_curvs_data[i].maxslope = slope
+                    total_curvs_data[i].maxslopepos = j
+            i += 1
+        i = 0
+        while i < total_curvs_count:
+            if total_curvs_data[i].upheight < 0.05:
+                total_curvs_data.pop(i)
+                i -= 1
+                total_curvs_count -= 1
+            i += 1
+        
+        #find change list
+        #find nearest right or left peak
+        #median slope
+        
+        fig, ax = plt.subplots()
+        ax.plot(total_curvs_filtered.list)
+        scatter_x = [total_curvs_data[i].peakpos for i in range(total_curvs_count)]
+        scatter_y = [total_curvs_filtered.list[total_curvs_data[i].peakpos] for i in range(total_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
+        scatter_x = [total_curvs_data[i].start for i in range(total_curvs_count)]
+        scatter_y = [total_curvs_filtered.list[total_curvs_data[i].start] for i in range(total_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='m', marker='^')
+        scatter_x = [total_curvs_data[i].end for i in range(total_curvs_count)]
+        scatter_y = [total_curvs_filtered.list[total_curvs_data[i].end] for i in range(total_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='m', marker='v')
+        '''
         trunk_angles = peak_analysis(trunk_angles)
         trunk_angles.runavg(0, l, 5)
         trunk_positive_angles_change = [0 for i in range(l)]
@@ -586,8 +725,10 @@ for file in os.listdir('.'):
                 f.write(word + ', ')
             f.write('\n')
             for i in range(total_stride):
-                data = [trunk_curvs_change.positive_peaks[i].pos, trunk_curvs_change.positive_peaks[i].length,
-                        trunk_curvs_change.positive_peaks[i].maxima, trunk_curvs_change.positive_peaks[i].auc,
+                data = [trunk_curvs_change.positive_peaks[i].pos,
+                        trunk_curvs_change.positive_peaks[i].length,
+                        trunk_curvs_change.positive_peaks[i].maxima,
+                        trunk_curvs_change.positive_peaks[i].auc,
                         stride_lengths[i], stride_current_speeds[i],
                         stride_speeds[i], stride_accels[i]]
                 for datum in data:
@@ -632,18 +773,19 @@ for file in os.listdir('.'):
         trunk_curvs_change.plot_peaks(ax, trunk_curvs_filtered.list, 'y', 'b', None)
         total_curvs_change.plot_peaks(ax, total_curvs_filtered.list, 'y', 'b', None)
         plt.show()
-        '''
+        
+        
         fig, (total_curvs_filtered_ax, tail_angles_ax, turn_ax, accel_ax) = plt.subplots(4, sharex=True)
         tail_positive_angles_change.plot_peaks(tail_angles_ax, tail_angles.list, 'y', 'b', None)
         tail_negative_angles_change.plot_peaks(tail_angles_ax, tail_angles.list, None, 'r', None)
         turns.plot_peaks(turn_ax, turns.list, 'y', 'b', 'r')
         accels.plot_peaks(accel_ax, speeds.list, 'y', 'b', 'r')
         plt.show()
-        '''
+        
         plt.figure()
         scatter_x = [peak.auc for peak in trunk_curvs_change.positive_peaks]
         scatter_y = stride_lengths
-        '''
+        
         scatter_x = []
         scatter_y = []
         for peaki in positive_amplitudes_change.positive_peaks:
@@ -658,41 +800,20 @@ for file in os.listdir('.'):
                     scatter_x.append(abs(peaki.auc))
                     scatter_y.append(peakj.auc)
                     continue
-        '''
+        
         plt.scatter(scatter_x, scatter_y)
         plt.show()
-        '''
-        for i in range(l):
-            image = np.zeros((700,200), np.uint8)
-            cv.line(image, (1, 350), (199, 350), 255, 1)
-            filtered_len = len(spine_angles_filtered[i])
-            for j in range(1, filtered_len):
-                cv.line(image, (round((j - 1) / filtered_len * 190 + 5), round(spine_angles_filtered[i][j - 1] * 100) + 350), (round(j / filtered_len * 190 + 5), round(spine_angles_filtered[i][j] * 100) + 350), 255, 2)
-            annotated.write(image)
-            print('\r' + str(i), end = '')
-        annotated.release()
-        '''
-        '''
-        for i in range(100):
-            spine = [spine_angles[i][j] for j in range(spine_lens[i] - 2)]
-            tail_angle = cal_direction_change(cal_direction(spines[i][0], spines[i][1]), cal_direction(tails[i], spines[i][0]))
-            #spine.insert(0, tail_angle)
-            ax.plot(spine)
-        '''
-        '''
+        
         plt.figure('correlation')
         
         turn_avg_p.plot_peaks(turn_avg.b, 'b', None)
         tail_angles_change_avg_p.plot_peaks(tail_angles_avg.b, 'g', None)
         plt.show()
+        
         '''
-    '''
-    plt.figure('accel')
-    accel_avg.plot_peaks(accel_avg.b, 'y', 'r')
-    accel_avg.plot_peaks(speed_avg, 'b', 'r')
-    plt.show()
     '''
     with open(path + '/' + videoname + '_analysis.csv', 'w') as f:
         for key in analysis:
             f.write(key + ', ' + str(analysis[key]) + '\n')
     print('Analysis of ' + videoname + ' complete.')
+    '''
