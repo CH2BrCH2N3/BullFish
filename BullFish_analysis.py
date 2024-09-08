@@ -208,7 +208,7 @@ for file in os.listdir('.'):
     
     accels = [0 for i in range(l)]
     for i in range(1, l):
-        accels[i] = (speeds.p_list[i] - speeds.p_list[i - 1]) * fps
+        accels[i] = (speeds.list[i] - speeds.list[i - 1]) * fps
     accels[0] = accels[1]
     accels = peak_analysis(accels, window=5, start=1, end=l)
     accels_peaks, _ = scipy.signal.find_peaks(accels.p_list, prominence=100)
@@ -220,50 +220,84 @@ for file in os.listdir('.'):
     ax.scatter(scatter_x, scatter_y, marker='x')
     
     accels_peak_count = len(accels_peaks)
-    accels_data = [peak_data() for i in range(accels_peak_count)]
+    speeds_data = [peak_data() for i in range(accels_peak_count)]
     i = 0
     while i < accels_peak_count:
-        j = accels_peaks[i]
+        j = int(accels_peaks[i])
         while j > 0:
-            slope = speeds.p_list[j] - speeds.p_list[j - 1]
+            slope = speeds.list[j] - speeds.list[j - 1]
             if slope < -0.1:
-                accels_data[i].start = j
+                speeds_data[i].start = j
                 break
             j -= 1
-        j = accels_peaks[i]
+        j = int(accels_peaks[i])
         while j < l - 1:
-            slope = speeds.p_list[j + 1] - speeds.p_list[j]
+            slope = speeds.list[j + 1] - speeds.list[j]
             if slope < -0.2:
-                accels_data[i].end = j
-                accels_data[i].length = j - accels_data[i].start
+                speeds_data[i].end = j
+                speeds_data[i].length = j - speeds_data[i].start
                 break
             j += 1
-        accels_data[i].height = speeds.p_list[accels_data[i].end]
-        accels_data[i].upheight = accels_data[i].height - speeds.p_list[accels_data[i].start]
-        for j in range(accels_data[i].start, accels_data[i].end):
-            slope = speeds.p_list[j + 1] - speeds.p_list[j]
-            if slope > accels_data[i].maxslope:
-                accels_data[i].maxslope = slope
-                accels_data[i].maxslopepos = j
+        speeds_data[i].height = speeds.list[speeds_data[i].end]
+        speeds_data[i].upheight = speeds_data[i].height - speeds.list[speeds_data[i].start]
+        for j in range(speeds_data[i].start, speeds_data[i].end):
+            slope = speeds.list[j + 1] - speeds.list[j]
+            if slope > speeds_data[i].maxslope:
+                speeds_data[i].maxslope = slope
+                speeds_data[i].maxslopepos = j
         i += 1
-    accels_count = len(accels_data)
+    accels_count = len(speeds_data)
     
     fig, ax = plt.subplots()
-    ax.plot(speeds.p_list)
-    scatter_x = [accels_data[i].start for i in range(accels_count)]
-    scatter_y = [speeds.p_list[accels_data[i].start] for i in range(accels_count)]
-    ax.scatter(scatter_x, scatter_y, c='r', marker='^')
-    scatter_x = [accels_data[i].end for i in range(accels_count)]
-    scatter_y = [speeds.p_list[accels_data[i].end] for i in range(accels_count)]
-    ax.scatter(scatter_x, scatter_y, c='g', marker='v')
-    scatter_x = [accels_data[i].maxslopepos for i in range(accels_count)]
-    scatter_y = [speeds.p_list[accels_data[i].maxslopepos] for i in range(accels_count)]
+    ax.plot(speeds.list)
+    for i in range(accels_count):
+        x = [j for j in range(speeds_data[i].start, speeds_data[i].end + 1)]
+        y = [speeds.list[j] for j in range(speeds_data[i].start, speeds_data[i].end + 1)]
+        ax.plot(x, y, c='r')
+    scatter_x = [speeds_data[i].maxslopepos for i in range(accels_count)]
+    scatter_y = [speeds.list[speeds_data[i].maxslopepos] for i in range(accels_count)]
     ax.scatter(scatter_x, scatter_y, c='y', marker='o')
     '''
-    analysis.update({
-        
-    })
+    ke = [0 for i in range(accels_count)]
+    for i in range(accels_count):
+        ke[i] = speeds_data[i].height ** 2 - speeds.list[speeds_data[i].start] ** 2
     '''
+    accels_per_min = Decimal(accels_count) * 60 / total_time
+    total_speed_change = 0
+    total_accel_dur = 0
+    mean_speed_change = 0
+    mean_peak_accel = 0
+    mean_accel = 0
+    mean_accel_dur = 0
+    max_speed_change = 0
+    max_peak_accel = 0
+    max_accel = 0
+    max_accel_dur = 0
+    if accels_count > 0:
+        total_speed_change = sum([speeds_data[i].upheight for i in range(accels_count)])
+        total_accel_dur = sum([(Decimal(speeds_data[i].length) / fps) for i in range(accels_count)])
+        mean_speed_change = total_speed_change / Decimal(accels_count)
+        mean_peak_accel = sum([(speeds_data[i].maxslope * fps) for i in range(accels_count)]) / Decimal(accels_count)
+        mean_accel = sum([(speeds_data[i].upheight * fps / Decimal(speeds_data[i].length)) for i in range(accels_count)]) / Decimal(accels_count)
+        mean_accel_dur = total_accel_dur / Decimal(accels_count)
+        max_speed_change = max([speeds_data[i].upheight for i in range(accels_count)])
+        max_peak_accel = max([(speeds_data[i].maxslope * fps) for i in range(accels_count)])
+        max_accel = max([(speeds_data[i].upheight * fps / Decimal(speeds_data[i].length)) for i in range(accels_count)])
+        max_accel_dur = max([(Decimal(speeds_data[i].length) / fps) for i in range(accels_count)])
+    analysis.update({
+        'accels_per_min': accels_per_min,
+        'total_speed_change': total_speed_change,
+        'total_accel_dur': total_accel_dur,
+        'mean_speed_change': mean_speed_change,
+        'mean_peak_accel': mean_peak_accel,
+        'mean_accel': mean_accel,
+        'mean_accel_dur': mean_accel_dur,
+        'max_speed_change': max_speed_change,
+        'max_peak_accel': max_peak_accel,
+        'max_accel': max_accel,
+        'max_accel_dur': max_accel_dur
+    })
+    
     if spine_analysis:
         
         spine_lens = [0 for i in range(l)]
@@ -351,38 +385,41 @@ for file in os.listdir('.'):
                 trunk_curvs_filtered[i] = trunk_curvs[i]
             total_curvs_filtered[i] = trunk_curvs_filtered[i] + abs(cal_direction_change(spine_dirs[0], tail_dir))
         
-        turns = peak_analysis(turns, window=5, start=1, end=l)
-        sampling = 4
-        turns_filtered = [0 for i in range(l)]
-        for i in range(sampling, l, sampling):
-            turns_filtered[i] = cal_direction_change(directions[i - sampling], directions[i]) * fps / Decimal(sampling)
-        for i in range(0, sampling):
-            turns_filtered[i] = turns_filtered[sampling]
-        for i in range(sampling * 2, l, sampling):
-            for j in range(i - sampling + 1, i):
-                turns_filtered[j] = (turns_filtered[i - sampling] * (i - j) + turns_filtered[i] * (j - (i - sampling))) / Decimal(sampling)
-        turns_filtered = peak_analysis(turns_filtered, window=5, start=sampling, end=l)
+        directions_free = [0 for i in range(l)]
+        directions_free[0] = directions[0]
+        for i in range(1, l):
+            directions_free[i] = directions_free[i - 1] + turns[i] / fps
+        directions_free = peak_analysis(directions_free, window=3, start=0, end=l)
+        turns_original = list(turns)
+        turns = [0 for i in range(l)]
+        for i in range(1, l):
+            turns[i] = (directions_free.list[i] - directions_free.list[i - 1]) * fps
+        turns = peak_analysis(turns, window=3, start=1, end=l)
         
-        turns_p_peaks, _ = scipy.signal.find_peaks(turns.p_list, prominence=3)
-        turns_p_peak_count = len(turns_p_peaks)
-        turns_p_data = [peak_data() for i in range(turns_p_peak_count)]
+        turns_p_peaks, _ = scipy.signal.find_peaks(turns.p_list, prominence=2)
+        turns_p_count = len(turns_p_peaks)
+        turns_p_data = [peak_data() for i in range(turns_p_count)]
         i = 0
-        while i < turns_p_peak_count:
-            j = turns_p_peaks[i]
+        while i < turns_p_count:
+            j = int(turns_p_peaks[i])
             turns_p_data[i].peakpos = j
             turns_p_data[i].height = turns.p_list[j]
             while j > 0:
                 slope = turns.p_list[j] - turns.p_list[j - 1]
-                if slope < -0.1:
+                if turns.p_list[j] > 2 and slope < -1:
+                    break
+                elif turns.p_list[j] <= 2 and slope < 0.1:
                     break
                 j -= 1
             turns_p_data[i].start = j
             turns_p_data[i].uplength = turns_p_peaks[i] - j
             turns_p_data[i].upheight = turns_p_data[i].height - turns.p_list[j]
-            j = turns_p_peaks[i]
+            j = int(turns_p_peaks[i])
             while j < l - 1:
                 slope = turns.p_list[j + 1] - turns.p_list[j]
-                if slope > 0.1:
+                if turns.p_list[j] > 2 and slope > 1:
+                    break
+                elif turns.p_list[j] <= 2 and slope > -0.1:
                     break
                 j += 1
             turns_p_data[i].end = j
@@ -396,27 +433,30 @@ for file in os.listdir('.'):
                 turns_p_data[i].auc += turns.p_list[j]
             i += 1
         
-        turns_p_count = len(turns_p_data)
-        turns_n_peaks, _ = scipy.signal.find_peaks(turns.n_list, prominence=3)
-        turns_n_peak_count = len(turns_n_peaks)
-        turns_n_data = [peak_data() for i in range(turns_n_peak_count)]
+        turns_n_peaks, _ = scipy.signal.find_peaks(turns.n_list, prominence=2)
+        turns_n_count = len(turns_n_peaks)
+        turns_n_data = [peak_data() for i in range(turns_n_count)]
         i = 0
-        while i < turns_n_peak_count:
-            j = turns_n_peaks[i]
+        while i < turns_n_count:
+            j = int(turns_n_peaks[i])
             turns_n_data[i].peakpos = j
             turns_n_data[i].height = turns.n_list[j]
             while j > 0:
                 slope = turns.n_list[j] - turns.n_list[j - 1]
-                if slope < -0.1:
+                if turns.n_list[j] > 2 and slope < -1:
+                    break
+                elif turns.n_list[j] <= 2 and slope < 0.1:
                     break
                 j -= 1
             turns_n_data[i].start = j
             turns_n_data[i].uplength = turns_n_peaks[i] - j
             turns_n_data[i].upheight = turns_n_data[i].height - turns.n_list[j]
-            j = turns_n_peaks[i]
+            j = int(turns_n_peaks[i])
             while j < l - 1:
                 slope = turns.n_list[j + 1] - turns.n_list[j]
-                if slope > 0.1:
+                if turns.n_list[j] > 2 and slope > 1:
+                    break
+                elif turns.n_list[j] <= 2 and slope > -0.1:
                     break
                 j += 1
             turns_n_data[i].end = j
@@ -429,76 +469,399 @@ for file in os.listdir('.'):
             for j in range(turns_n_data[i].start, turns_n_data[i].end + 1):
                 turns_n_data[i].auc += turns.n_list[j]
             i += 1
+        '''
+        for i in range(turns_p_count):
+            if turns_p_data[i].auc > 17:
+                turns_p_data[i].function = {'significant': True}
+            else:
+                turns_p_data[i].function = {'significant': False}
+        for i in range(turns_n_count):
+            if turns_n_data[i].auc > 17:
+                turns_n_data[i].function = {'significant': True}
+            else:
+                turns_n_data[i].function = {'significant': False}
+        '''
+        turns_data = []
+        i = 0
+        p_i = 0
+        n_i = 0
+        while p_i < turns_p_count or n_i < turns_n_count:
+            choose_p = True
+            if p_i >= turns_p_count:
+                choose_p = False
+            elif n_i < turns_n_count:
+                if turns_p_data[p_i].start > turns_n_data[n_i].start:
+                    choose_p = False
+            if choose_p:
+                turns_data.append(turns_p_data[p_i])
+                p_i += 1
+            else:
+                turns_data.append(turns_n_data[n_i])
+                '''
+                turns_data[i].height = -turns_data[i].height
+                turns_data[i].upheight = -turns_data[i].upheight
+                turns_data[i].auc = -turns_data[i].auc
+                turns_data[i].maxslope = -turns_data[i].maxslope
+                '''
+                n_i += 1
+            i += 1
+        turns_count = len(turns_data)
         
-        turns_n_count = len(turns_n_data)
-        
-        fig, ax = plt.subplots()
-        ax.plot(turns.list)
-        ax.plot(turns_filtered.list, c='g')
-        ax.plot(turns.original_list, c='y')
-        scatter_x = [turns_p_data[i].peakpos for i in range(turns_p_count)]
-        scatter_y = [turns.list[turns_p_data[i].peakpos] for i in range(turns_p_count)]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
-        scatter_x = [turns_p_data[i].start for i in range(turns_p_count)]
-        scatter_y = [turns.list[turns_p_data[i].start] for i in range(turns_p_count)]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='^')
-        scatter_x = [turns_p_data[i].end for i in range(turns_p_count)]
-        scatter_y = [turns.list[turns_p_data[i].end] for i in range(turns_p_count)]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='v')
-        scatter_x = [turns_n_data[i].peakpos for i in range(turns_n_count)]
-        scatter_y = [turns.list[turns_n_data[i].peakpos] for i in range(turns_n_count)]
-        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
-        scatter_x = [turns_n_data[i].start for i in range(turns_n_count)]
-        scatter_y = [turns.list[turns_n_data[i].start] for i in range(turns_n_count)]
-        ax.scatter(scatter_x, scatter_y, c='r', marker='^')
-        scatter_x = [turns_n_data[i].end for i in range(turns_n_count)]
-        scatter_y = [turns.list[turns_n_data[i].end] for i in range(turns_n_count)]
-        ax.scatter(scatter_x, scatter_y, c='r', marker='v')
+        turn_count_per_min = Decimal(turns_count) * 60 / total_time
+        right_turn_count_per_min = Decimal(turns_p_count) * 60 / total_time
+        left_turn_count_per_min = Decimal(turns_n_count) * 60 / total_time
+        turn_count_preference = cal_preference(turns_p_count, turns_n_count)
+        total_turn_angle_per_min = sum([abs(turns_data[i].auc / fps * 180 / pi) for i in range(turns_count)]) * 60 / total_time
+        total_right_turn_angle_per_min = sum([(turns_p_data[i].auc / fps * 180 / pi) for i in range(turns_p_count)]) * 60 / total_time
+        total_left_turn_angle_per_min = sum([(turns_n_data[i].auc / fps * 180 / pi) for i in range(turns_n_count)]) * 60 / total_time
+        total_turn_angle_preference = cal_preference(total_right_turn_angle_per_min, total_left_turn_angle_per_min)
+        mean_turn_angle = total_turn_angle_per_min * total_time / 60 / Decimal(turns_count)
+        mean_right_turn_angle = total_right_turn_angle_per_min * total_time / 60 / Decimal(turns_p_count)
+        mean_left_turn_angle = total_left_turn_angle_per_min * total_time / 60 / Decimal(turns_n_count)
+        mean_turn_angle_preference = cal_preference(mean_right_turn_angle, mean_left_turn_angle)
+        total_turn_dur = sum([(Decimal(turns_data[i].length) / fps) for i in range(turns_count)])
+        total_right_turn_dur = sum([(Decimal(turns_p_data[i].length) / fps) for i in range(turns_p_count)])
+        total_left_turn_dur = sum([(Decimal(turns_n_data[i].length) / fps) for i in range(turns_n_count)])
+        total_turn_dur_preference = cal_preference(total_right_turn_dur, total_left_turn_dur)
+        mean_turn_dur = total_turn_dur / Decimal(turns_count)
+        mean_right_turn_dur = total_right_turn_dur / Decimal(turns_p_count)
+        mean_left_turn_dur = total_left_turn_dur / Decimal(turns_n_count)
+        mean_turn_dur_preference = cal_preference(mean_right_turn_dur, mean_left_turn_dur)
+        mean_turn_velocity = sum([abs(turns_data[i].height) for i in range(turns_count)]) / Decimal(turns_count)
+        mean_right_turn_velocity = sum([turns_p_data[i].height for i in range(turns_p_count)]) / Decimal(turns_p_count)
+        mean_left_turn_velocity = sum([turns_n_data[i].height for i in range(turns_n_count)]) / Decimal(turns_n_count)
+        mean_turn_velocity_preference = cal_preference(mean_right_turn_velocity, mean_left_turn_velocity)
+        analysis.update({
+            'turn_count_per_min': turn_count_per_min,
+            'right_turn_count_per_min': right_turn_count_per_min,
+            'left_turn_count_per_min': left_turn_count_per_min,
+            'turn_count_preference': turn_count_preference,
+            'total_turn_angle_per_min': total_turn_angle_per_min,
+            'total_right_turn_angle_per_min': total_right_turn_angle_per_min,
+            'total_left_turn_angle_per_min': total_left_turn_angle_per_min,
+            'total_turn_angle_preference': total_turn_angle_preference,
+            'mean_turn_angle': mean_turn_angle,
+            'mean_right_turn_angle': mean_right_turn_angle,
+            'mean_left_turn_angle': mean_left_turn_angle,
+            'mean_turn_angle_preference': mean_turn_angle_preference,
+            'total_turn_dur': total_turn_dur,
+            'total_right_turn_dur': total_right_turn_dur,
+            'total_left_turn_dur': total_left_turn_dur,
+            'total_turn_dur_preference': total_turn_dur_preference,
+            'mean_turn_dur': mean_turn_dur,
+            'mean_right_turn_dur': mean_right_turn_dur,
+            'mean_left_turn_dur': mean_left_turn_dur,
+            'mean_turn_dur_preference': mean_turn_dur_preference,
+            'mean_turn_velocity': mean_turn_velocity,
+            'mean_right_turn_velocity': mean_right_turn_velocity,
+            'mean_left_turn_velocity': mean_left_turn_velocity,
+            'mean_turn_velocity_preference': mean_turn_velocity_preference
+        })
         
         trunk_angles = peak_analysis(trunk_angles, window=5, start=0, end=l)
-        trunk_angles_p_peaks, _ = scipy.signal.find_peaks(trunk_angles.p_list, prominence=0.05)
+        trunk_angles_ddt = [0 for i in range(l)]
+        for i in range(1, l):
+            trunk_angles_ddt[i] = trunk_angles.list[i] - trunk_angles.list[i - 1]
+        trunk_angles_ddt = peak_analysis(trunk_angles_ddt, window=5, start=1, end=l)
         trunk_angles_p_data = []
+        trunk_angles_ddt_p_peaks, _ = scipy.signal.find_peaks(trunk_angles_ddt.p_list, prominence=0.05)
+        trunk_angles_ddt_p_count = len(trunk_angles_ddt_p_peaks)
+        i = 0
+        while i < trunk_angles_ddt_p_count:
+            current_peak_data = peak_data()
+            j = int(trunk_angles_ddt_p_peaks[i])
+            while j > 0:
+                slope = trunk_angles.list[j] - trunk_angles.list[j - 1]
+                if slope < 0:
+                    break
+                j -= 1
+            current_peak_data.start = j
+            j = int(trunk_angles_ddt_p_peaks[i])
+            while j < l - 1:
+                slope = trunk_angles.list[j + 1] - trunk_angles.list[j]
+                if slope < 0:
+                    break
+                j += 1
+            current_peak_data.peakpos = j
+            current_peak_data.uplength = j - current_peak_data.start
+            current_peak_data.height = trunk_angles.list[j]
+            current_peak_data.upheight = trunk_angles.list[j] - trunk_angles.list[current_peak_data.start]
+            if current_peak_data.upheight < 0.05:
+                i += 1
+                continue
+            trunk_angles_p_data.append(current_peak_data)
+            i += 1
+        trunk_angles_p_count = len(trunk_angles_p_data)
         trunk_angles_n_peaks, _ = scipy.signal.find_peaks(trunk_angles.n_list, prominence=0.05)
         trunk_angles_n_data = []
+        trunk_angles_ddt_n_peaks, _ = scipy.signal.find_peaks(trunk_angles_ddt.n_list, prominence=0.05)
+        trunk_angles_ddt_n_count = len(trunk_angles_ddt_n_peaks)
+        i = 0
+        while i < trunk_angles_ddt_n_count:
+            current_peak_data = peak_data()
+            j = int(trunk_angles_ddt_n_peaks[i])
+            while j > 0:
+                slope = trunk_angles.list[j] - trunk_angles.list[j - 1]
+                if slope > 0:
+                    break
+                j -= 1
+            current_peak_data.start = j
+            j = int(trunk_angles_ddt_n_peaks[i])
+            while j < l - 1:
+                slope = trunk_angles.list[j + 1] - trunk_angles.list[j]
+                if slope > 0:
+                    break
+                j += 1
+            current_peak_data.peakpos = j
+            current_peak_data.uplength = j - current_peak_data.start
+            current_peak_data.height = trunk_angles.list[j]
+            current_peak_data.upheight = trunk_angles.list[j] - trunk_angles.list[current_peak_data.start]
+            if current_peak_data.upheight > -0.05:
+                i += 1
+                continue
+            trunk_angles_n_data.append(current_peak_data)
+            i += 1
+        trunk_angles_n_count = len(trunk_angles_n_data)
         
-        fig, ax = plt.subplots()
-        ax.plot(trunk_angles.list)
-        scatter_x = trunk_angles_p_peaks
-        scatter_y = [trunk_angles.list[i] for i in trunk_angles_p_peaks]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
-        scatter_x = trunk_angles_n_peaks
-        scatter_y = [trunk_angles.list[i] for i in trunk_angles_n_peaks]
-        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
-        
+        trunk_angles_data = []
+        i = 0
+        p_i = 0
+        n_i = 0
+        while p_i < trunk_angles_p_count or n_i < trunk_angles_n_count:
+            choose_p = True
+            if p_i >= trunk_angles_p_count:
+                choose_p = False
+            elif n_i < trunk_angles_n_count:
+                if trunk_angles_p_data[p_i].start > trunk_angles_n_data[n_i].start:
+                    choose_p = False
+            if choose_p:
+                trunk_angles_data.append(trunk_angles_p_data[p_i])
+                p_i += 1
+            else:
+                trunk_angles_data.append(trunk_angles_n_data[n_i])
+                trunk_angles_data[i].height = -trunk_angles_data[i].height
+                trunk_angles_data[i].upheight = -trunk_angles_data[i].upheight
+                n_i += 1
+            i += 1
+        trunk_angles_count = len(trunk_angles_data)
+        i = 0
+        while i < trunk_angles_count - 1:
+            if trunk_angles_data[i].end > trunk_angles_data[i + 1].start:
+                trunk_angles_data[i].end = trunk_angles_data[i + 1].start
+            i += 1
+        '''
+        trunk_bend_count_per_min = Decimal(trunk_angles_count) * 60 / total_time
+        right_trunk_bend_count_per_min = Decimal(trunk_angles_p_count) * 60 / total_time
+        left_trunk_bend_count_per_min = Decimal(trunk_angles_n_count) * 60 / total_time
+        trunk_bend_count_preference = cal_preference(trunk_angles_p_count, trunk_angles_n_count)
+        total_trunk_bend_angle_per_min = sum([trunk_angles_data[i].upheight])
+        '''
         tail_angles = peak_analysis(tail_angles, window=5, start=0, end=l)
-        tail_angles_p_peaks, _ = scipy.signal.find_peaks(tail_angles.p_list, prominence=0.05)
+        tail_angles_ddt = [0 for i in range(l)]
+        for i in range(1, l):
+            tail_angles_ddt[i] = tail_angles.list[i] - tail_angles.list[i - 1]
+        tail_angles_ddt = peak_analysis(tail_angles_ddt, window=5, start=1, end=l)
         tail_angles_p_data = []
+        tail_angles_ddt_p_peaks, _ = scipy.signal.find_peaks(tail_angles_ddt.p_list, prominence=0.05)
+        tail_angles_ddt_p_count = len(tail_angles_ddt_p_peaks)
+        i = 0
+        while i < tail_angles_ddt_p_count:
+            current_peak_data = peak_data()
+            j = int(tail_angles_ddt_p_peaks[i])
+            while j > 0:
+                slope = tail_angles.list[j] - tail_angles.list[j - 1]
+                if slope < 0:
+                    break
+                j -= 1
+            current_peak_data.start = j
+            j = int(tail_angles_ddt_p_peaks[i])
+            while j < l - 1:
+                slope = tail_angles.list[j + 1] - tail_angles.list[j]
+                if slope < 0:
+                    break
+                j += 1
+            current_peak_data.peakpos = j
+            current_peak_data.uplength = j - current_peak_data.start
+            current_peak_data.height = tail_angles.list[j]
+            current_peak_data.upheight = tail_angles.list[j] - tail_angles.list[current_peak_data.start]
+            if current_peak_data.upheight < 0.05:
+                i += 1
+                continue
+            tail_angles_p_data.append(current_peak_data)
+            i += 1
+        tail_angles_p_count = len(tail_angles_p_data)
         tail_angles_n_peaks, _ = scipy.signal.find_peaks(tail_angles.n_list, prominence=0.05)
         tail_angles_n_data = []
+        tail_angles_ddt_n_peaks, _ = scipy.signal.find_peaks(tail_angles_ddt.n_list, prominence=0.05)
+        tail_angles_ddt_n_count = len(tail_angles_ddt_n_peaks)
+        i = 0
+        while i < tail_angles_ddt_n_count:
+            current_peak_data = peak_data()
+            j = int(tail_angles_ddt_n_peaks[i])
+            while j > 0:
+                slope = tail_angles.list[j] - tail_angles.list[j - 1]
+                if slope > 0:
+                    break
+                j -= 1
+            current_peak_data.start = j
+            j = int(tail_angles_ddt_n_peaks[i])
+            while j < l - 1:
+                slope = tail_angles.list[j + 1] - tail_angles.list[j]
+                if slope > 0:
+                    break
+                j += 1
+            current_peak_data.peakpos = j
+            current_peak_data.uplength = j - current_peak_data.start
+            current_peak_data.height = tail_angles.list[j]
+            current_peak_data.upheight = tail_angles.list[j] - tail_angles.list[current_peak_data.start]
+            if current_peak_data.upheight > -0.05:
+                i += 1
+                continue
+            tail_angles_n_data.append(current_peak_data)
+            i += 1
+        tail_angles_n_count = len(tail_angles_n_data)
         
-        fig, ax = plt.subplots()
-        ax.plot(tail_angles.list)
-        scatter_x = tail_angles_p_peaks
-        scatter_y = [tail_angles.list[i] for i in tail_angles_p_peaks]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
-        scatter_x = tail_angles_n_peaks
-        scatter_y = [tail_angles.list[i] for i in tail_angles_n_peaks]
-        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        tail_angles_data = []
+        i = 0
+        p_i = 0
+        n_i = 0
+        while p_i < tail_angles_p_count or n_i < tail_angles_n_count:
+            choose_p = True
+            if p_i >= tail_angles_p_count:
+                choose_p = False
+            elif n_i < tail_angles_n_count:
+                if tail_angles_p_data[p_i].start > tail_angles_n_data[n_i].start:
+                    choose_p = False
+            if choose_p:
+                tail_angles_data.append(tail_angles_p_data[p_i])
+                p_i += 1
+            else:
+                tail_angles_data.append(tail_angles_n_data[n_i])
+                tail_angles_data[i].height = -tail_angles_data[i].height
+                tail_angles_data[i].upheight = -tail_angles_data[i].upheight
+                n_i += 1
+            i += 1
+        tail_angles_count = len(tail_angles_data)
+        i = 0
+        while i < tail_angles_count - 1:
+            if tail_angles_data[i].end > tail_angles_data[i + 1].start:
+                tail_angles_data[i].end = tail_angles_data[i + 1].start
+            i += 1
         
         amplitudes = peak_analysis(amplitudes, window=5, start=0, end=l)
-        amplitudes_p_peaks, _ = scipy.signal.find_peaks(amplitudes.p_list, prominence=0.05)
+        amplitudes_ddt = [0 for i in range(l)]
+        for i in range(1, l):
+            amplitudes_ddt[i] = amplitudes.list[i] - amplitudes.list[i - 1]
+        amplitudes_ddt = peak_analysis(amplitudes_ddt, window=5, start=1, end=l)
         amplitudes_p_data = []
-        amplitudes_n_peaks, _ = scipy.signal.find_peaks(amplitudes.n_list, prominence=0.05)
+        amplitudes_ddt_p_peaks, _ = scipy.signal.find_peaks(amplitudes_ddt.p_list, prominence=0.5)
+        amplitudes_ddt_p_count = len(amplitudes_ddt_p_peaks)
+        i = 0
+        while i < amplitudes_ddt_p_count:
+            current_peak_data = peak_data()
+            j = int(amplitudes_ddt_p_peaks[i])
+            while j > 0:
+                slope = amplitudes.list[j] - amplitudes.list[j - 1]
+                if slope < 0:
+                    break
+                j -= 1
+            current_peak_data.start = j
+            j = int(amplitudes_ddt_p_peaks[i])
+            while j < l - 1:
+                slope = amplitudes.list[j + 1] - amplitudes.list[j]
+                if slope < 0:
+                    break
+                j += 1
+            current_peak_data.peakpos = j
+            current_peak_data.uplength = j - current_peak_data.start
+            current_peak_data.height = amplitudes.list[j]
+            current_peak_data.upheight = amplitudes.list[j] - amplitudes.list[current_peak_data.start]
+            if current_peak_data.upheight < 0.5:
+                i += 1
+                continue
+            amplitudes_p_data.append(current_peak_data)
+            i += 1
+        amplitudes_p_count = len(amplitudes_p_data)
+        amplitudes_n_peaks, _ = scipy.signal.find_peaks(amplitudes.n_list, prominence=0.5)
         amplitudes_n_data = []
+        amplitudes_ddt_n_peaks, _ = scipy.signal.find_peaks(amplitudes_ddt.n_list, prominence=0.5)
+        amplitudes_ddt_n_count = len(amplitudes_ddt_n_peaks)
+        i = 0
+        while i < amplitudes_ddt_n_count:
+            current_peak_data = peak_data()
+            j = int(amplitudes_ddt_n_peaks[i])
+            while j > 0:
+                slope = amplitudes.list[j] - amplitudes.list[j - 1]
+                if slope > 0:
+                    break
+                j -= 1
+            current_peak_data.start = j
+            j = int(amplitudes_ddt_n_peaks[i])
+            while j < l - 1:
+                slope = amplitudes.list[j + 1] - amplitudes.list[j]
+                if slope > 0:
+                    break
+                j += 1
+            current_peak_data.peakpos = j
+            current_peak_data.uplength = j - current_peak_data.start
+            current_peak_data.height = amplitudes.list[j]
+            current_peak_data.upheight = amplitudes.list[j] - amplitudes.list[current_peak_data.start]
+            if current_peak_data.upheight > -0.5:
+                i += 1
+                continue
+            amplitudes_n_data.append(current_peak_data)
+            i += 1
+        amplitudes_n_count = len(amplitudes_n_data)
         
-        fig, ax = plt.subplots()
-        ax.plot(amplitudes.list)
-        scatter_x = amplitudes_p_peaks
-        scatter_y = [amplitudes.list[i] for i in amplitudes_p_peaks]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
-        scatter_x = amplitudes_n_peaks
-        scatter_y = [amplitudes.list[i] for i in amplitudes_n_peaks]
-        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        amplitudes_data = []
+        p_i = 0
+        n_i = 0
+        while p_i < amplitudes_p_count or n_i < amplitudes_n_count:
+            choose_p = True
+            if p_i >= amplitudes_p_count:
+                choose_p = False
+            elif n_i < amplitudes_n_count:
+                if amplitudes_p_data[p_i].start > amplitudes_n_data[n_i].start:
+                    choose_p = False
+            if choose_p:
+                amplitudes_data.append(amplitudes_p_data[p_i])
+                p_i += 1
+            else:
+                amplitudes_data.append(amplitudes_n_data[n_i])
+                n_i += 1
+        amplitudes_count = len(amplitudes_data)
+        i = 0
+        while i < amplitudes_count - 1:
+            if amplitudes_data[i].end > amplitudes_data[i + 1].start:
+                amplitudes_data[i].end = amplitudes_data[i + 1].start
+            i += 1
+        
+        bursts = []
+        i = 0
+        accel_i = 0
+        while i < trunk_angles_count - 1:
+            pair = False
+            i_data = trunk_angles_data[i]
+            next_data = trunk_angles_data[i + 1]
+            i_up = trunk_angles.list[i_data.peakpos] > trunk_angles.list[i_data.start]
+            next_up = trunk_angles.list[next_data.peakpos] > trunk_angles.list[next_data.start]
+            if (i_up == True and next_up == False) or (i_up == False and next_up == True):
+                if next_data.start - i_data.peakpos <= 1:
+                    pair = True
+            if pair:
+                while accel_i < accels_count:
+                    if speeds_data[accel_i].maxslopepos >= i_data.start:
+                        if speeds_data[accel_i].maxslopepos < next_data.peakpos:
+                            #trunk_angles_data[i].function = {'pair': i + 1}
+                            
+                            bursts.append({'i': i,
+                                           'next': i + 1,
+                                           'accel': speeds_data[accel_i]})
+                            accel_i += 1
+                        break
+                    accel_i += 1
+            i += 1
+        
         
         trunk_curvs_filtered = peak_analysis(trunk_curvs_filtered, window=5, start=0, end=l)
         trunk_curvs_peaks, _ = scipy.signal.find_peaks(trunk_curvs_filtered.list, prominence=0.05)
@@ -506,7 +869,7 @@ for file in os.listdir('.'):
         trunk_curvs_data = [peak_data() for i in range(trunk_curvs_count)]
         i = 0
         while i < trunk_curvs_count:
-            j = trunk_curvs_peaks[i]
+            j = int(trunk_curvs_peaks[i])
             trunk_curvs_data[i].peakpos = j
             trunk_curvs_data[i].height = trunk_curvs_filtered.list[j]
             while j > 0:
@@ -517,7 +880,7 @@ for file in os.listdir('.'):
             trunk_curvs_data[i].start = j
             trunk_curvs_data[i].upheight = trunk_curvs_data[i].height - trunk_curvs_filtered.list[j]
             trunk_curvs_data[i].uplength = trunk_curvs_peaks[i] - j
-            j = trunk_curvs_peaks[i]
+            j = int(trunk_curvs_peaks[i])
             while j < l - 1:
                 slope = trunk_curvs_filtered.list[j + 1] - trunk_curvs_filtered.list[j]
                 if slope > 0:
@@ -539,17 +902,14 @@ for file in os.listdir('.'):
                 trunk_curvs_count -= 1
             i += 1
         
-        fig, ax = plt.subplots()
-        ax.plot(trunk_curvs_filtered.list)
-        scatter_x = [trunk_curvs_data[i].peakpos for i in range(trunk_curvs_count)]
-        scatter_y = [trunk_curvs_filtered.list[trunk_curvs_data[i].peakpos] for i in range(trunk_curvs_count)]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
-        scatter_x = [trunk_curvs_data[i].start for i in range(trunk_curvs_count)]
-        scatter_y = [trunk_curvs_filtered.list[trunk_curvs_data[i].start] for i in range(trunk_curvs_count)]
-        ax.scatter(scatter_x, scatter_y, c='m', marker='^')
-        scatter_x = [trunk_curvs_data[i].end for i in range(trunk_curvs_count)]
-        scatter_y = [trunk_curvs_filtered.list[trunk_curvs_data[i].end] for i in range(trunk_curvs_count)]
-        ax.scatter(scatter_x, scatter_y, c='m', marker='v')
+        trunk_curv_count_per_min = trunk_curvs_count * 60 / total_time
+        total_trunk_curv_angle_per_min = sum([(trunk_curvs_data[i].upheight * 180 / pi) for i in range(trunk_curvs_count)]) * 60 / total_time
+        mean_trunk_curv_angle = total_trunk_curv_angle_per_min * total_time / 60 / Decimal(trunk_curvs_count)
+        analysis.update({
+            'trunk_curv_count_per_min': trunk_curv_count_per_min,
+            'total_trunk_curv_angle_per_min': total_trunk_curv_angle_per_min,
+            'mean_trunk_curv_angle': mean_trunk_curv_angle
+        })
         
         total_curvs_filtered = peak_analysis(total_curvs_filtered, window=5, start=0, end=l)
         total_curvs_peaks, _ = scipy.signal.find_peaks(total_curvs_filtered.list, prominence=0.05)
@@ -557,7 +917,7 @@ for file in os.listdir('.'):
         total_curvs_data = [peak_data() for i in range(total_curvs_count)]
         i = 0
         while i < total_curvs_count:
-            j = total_curvs_peaks[i]
+            j = int(total_curvs_peaks[i])
             total_curvs_data[i].peakpos = j
             total_curvs_data[i].height = total_curvs_filtered.list[j]
             while j > 0:
@@ -568,7 +928,7 @@ for file in os.listdir('.'):
             total_curvs_data[i].start = j
             total_curvs_data[i].upheight = total_curvs_data[i].height - total_curvs_filtered.list[j]
             total_curvs_data[i].uplength = total_curvs_peaks[i] - j
-            j = total_curvs_peaks[i]
+            j = int(total_curvs_peaks[i])
             while j < l - 1:
                 slope = total_curvs_filtered.list[j + 1] - total_curvs_filtered.list[j]
                 if slope > 0:
@@ -576,7 +936,7 @@ for file in os.listdir('.'):
                 j += 1
             total_curvs_data[i].end = j
             total_curvs_data[i].length = j - total_curvs_data[i].start
-            for j in range(total_curvs_data[i].start, total_curvs_data[i].end + 1):
+            for j in range(total_curvs_data[i].start, total_curvs_data[i].end):
                 slope = total_curvs_filtered.list[j + 1] - total_curvs_filtered.list[j]
                 if slope > total_curvs_data[i].maxslope:
                     total_curvs_data[i].maxslope = slope
@@ -594,112 +954,7 @@ for file in os.listdir('.'):
         #find nearest right or left peak
         #median slope
         
-        fig, ax = plt.subplots()
-        ax.plot(total_curvs_filtered.list)
-        scatter_x = [total_curvs_data[i].peakpos for i in range(total_curvs_count)]
-        scatter_y = [total_curvs_filtered.list[total_curvs_data[i].peakpos] for i in range(total_curvs_count)]
-        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
-        scatter_x = [total_curvs_data[i].start for i in range(total_curvs_count)]
-        scatter_y = [total_curvs_filtered.list[total_curvs_data[i].start] for i in range(total_curvs_count)]
-        ax.scatter(scatter_x, scatter_y, c='m', marker='^')
-        scatter_x = [total_curvs_data[i].end for i in range(total_curvs_count)]
-        scatter_y = [total_curvs_filtered.list[total_curvs_data[i].end] for i in range(total_curvs_count)]
-        ax.scatter(scatter_x, scatter_y, c='m', marker='v')
         '''
-        trunk_angles = peak_analysis(trunk_angles)
-        trunk_angles.runavg(0, l, 5)
-        trunk_positive_angles_change = [0 for i in range(l)]
-        trunk_negative_angles_change = [0 for i in range(l)]
-        tail_angles = peak_analysis(tail_angles)
-        tail_angles.runavg(0, l, 5)
-        tail_positive_angles_change = [0 for i in range(l)]
-        tail_negative_angles_change = [0 for i in range(l)]
-        amplitudes = peak_analysis(amplitudes)
-        amplitudes.runavg(0, l, 5)
-        positive_amplitudes_change = [0 for i in range(l)]
-        negative_amplitudes_change = [0 for i in range(l)]
-        trunk_curvs_filtered = peak_analysis(trunk_curvs_filtered)
-        trunk_curvs_filtered.runavg(0, l, 5)
-        trunk_curvs_change = [0 for i in range(l)]
-        total_curvs_filtered = peak_analysis(total_curvs_filtered)
-        total_curvs_filtered.runavg(0, l, 5)
-        total_curvs_change = [0 for i in range(l)]
-        for i in range(1, l):
-            trunk_positive_angles_change[i] = (trunk_angles.positive_list[i] - trunk_angles.positive_list[i - 1]) * fps
-            trunk_negative_angles_change[i] = (trunk_angles.negative_list[i] - trunk_angles.negative_list[i - 1]) * fps
-            tail_positive_angles_change[i] = (tail_angles.positive_list[i] - tail_angles.positive_list[i - 1]) * fps
-            tail_negative_angles_change[i] = (tail_angles.negative_list[i] - tail_angles.negative_list[i - 1]) * fps
-            positive_amplitudes_change[i] = (amplitudes.positive_list[i] - amplitudes.positive_list[i - 1]) * fps
-            negative_amplitudes_change[i] = (amplitudes.negative_list[i] - amplitudes.negative_list[i - 1]) * fps
-            trunk_curvs_change[i] = (trunk_curvs_filtered.list[i] - trunk_curvs_filtered.list[i - 1]) * fps
-            total_curvs_change[i] = (total_curvs_filtered.list[i] - total_curvs_filtered.list[i - 1]) * fps
-        
-        turn_criteria = peak_data(0, turn_min_dur * fps, turn_min_maxima, turn_min_auc)
-        turns = peak_analysis(turns)
-        turns.runavg(1, l, 5)
-        turns.find_peaks(turn_cutoff, turn_cutoff, turn_criteria)
-        turns.write_peaks(path + '/' + videoname + '_turn_peaks_data.csv')
-        
-        turn_per_min = Decimal(turns.count) / total_time * 60
-        right_turn_per_min = Decimal(turns.positive_count) / total_time * 60
-        left_turn_per_min = Decimal(turns.negative_count) / total_time * 60
-        turn_count_preference = cal_preference(right_turn_per_min, left_turn_per_min)
-        turn_angle_mean = turns.auc_mean
-        right_turn_angle_mean = turns.positive_auc_mean
-        left_turn_angle_mean = turns.negative_auc_mean
-        turn_angle_preference = cal_preference(right_turn_angle_mean, left_turn_angle_mean)
-        turn_speed_mean = turns.maxima_mean
-        right_turn_speed_mean = turns.positive_maxima_mean
-        left_turn_speed_mean = turns.negative_maxima_mean
-        turn_speed_preference = cal_preference(right_turn_speed_mean, left_turn_speed_mean)
-        meandering = turns.auc_sum / total_distance
-        analysis.update({
-            'turn_per_min': turn_per_min,
-            'right_turn_per_min': right_turn_per_min,
-            'left_turn_per_min': left_turn_per_min,
-            'turn_count_preference': turn_count_preference,
-            'turn_angle_mean': turn_angle_mean,
-            'right_turn_angle_mean': right_turn_angle_mean,
-            'left_turn_angle_mean': left_turn_angle_mean,
-            'turn_angle_preference': turn_angle_preference,
-            'turn_speed_mean': turn_speed_mean,
-            'right_turn_speed_mean': right_turn_speed_mean,
-            'left_turn_speed_mean': left_turn_speed_mean,
-            'turn_speed_preference': turn_speed_preference,
-            'meandering': meandering
-        })
-        
-        angle_criteria = peak_data(0, angle_min_dur * fps, angle_min_maxima, angle_min_auc)
-        trunk_positive_angles_change = peak_analysis(trunk_positive_angles_change)
-        trunk_positive_angles_change.runavg(1, l, 5)
-        trunk_negative_angles_change = peak_analysis(trunk_negative_angles_change)
-        trunk_negative_angles_change.runavg(1, l, 5)
-        trunk_positive_angles_change.find_peaks(angle_cutoff, angle_cutoff, angle_criteria)
-        trunk_negative_angles_change.find_peaks(angle_cutoff, angle_cutoff, angle_criteria)
-        #trunk_angles.write_peaks(path + '/' + videoname + '_trunk_angles_peaks_data.csv')
-        tail_positive_angles_change = peak_analysis(tail_positive_angles_change)
-        tail_positive_angles_change.runavg(1, l, 5)
-        tail_negative_angles_change = peak_analysis(tail_negative_angles_change)
-        tail_negative_angles_change.runavg(1, l, 5)
-        tail_positive_angles_change.find_peaks(angle_cutoff, angle_cutoff, angle_criteria)
-        tail_negative_angles_change.find_peaks(angle_cutoff, angle_cutoff, angle_criteria)
-        #tail_angles.write_peaks(path + '/' + videoname + '_tail_angles_peaks_data.csv')
-        trunk_curvs_change = peak_analysis(trunk_curvs_change)
-        trunk_curvs_change.runavg(1, l, 5)
-        trunk_curvs_change.find_peaks(angle_cutoff, angle_cutoff, angle_criteria)
-        #trunk_curvs_change.write_peaks(path + '/' + videoname + '_trunk_curvs_peaks_data.csv')
-        total_curvs_change = peak_analysis(total_curvs_change)
-        total_curvs_change.runavg(1, l, 5)
-        total_curvs_change.find_peaks(angle_cutoff, angle_cutoff, angle_criteria)
-        total_curvs_change.write_peaks(path + '/' + videoname + '_total_curvs_peaks_data.csv')
-        amplitude_criteria = peak_data(0, amplitude_min_dur * fps, amplitude_min_maxima, amplitude_min_auc)
-        positive_amplitudes_change = peak_analysis(positive_amplitudes_change)
-        positive_amplitudes_change.runavg(1, l, 5)
-        negative_amplitudes_change = peak_analysis(negative_amplitudes_change)
-        negative_amplitudes_change.runavg(1, l, 5)
-        positive_amplitudes_change.find_peaks(amplitude_cutoff, amplitude_cutoff, amplitude_criteria)
-        negative_amplitudes_change.find_peaks(amplitude_cutoff, amplitude_cutoff, amplitude_criteria)
-        
         total_stride = trunk_curvs_change.positive_count
         stride_lengths = [0 for i in range(total_stride)]
         stride_current_speeds = [0 for i in range(total_stride)]
@@ -762,19 +1017,6 @@ for file in os.listdir('.'):
             'stride_accel_mean': stride_accel_mean
         })
         
-        fig, ax = plt.subplots()
-        trunk_positive_angles_change.plot_peaks(ax, trunk_angles.list, 'y', 'b', None)
-        trunk_negative_angles_change.plot_peaks(ax, trunk_angles.list, None, 'r', None)
-        tail_positive_angles_change.plot_peaks(ax, tail_angles.list, 'y', 'b', None)
-        tail_negative_angles_change.plot_peaks(ax, tail_angles.list, None, 'r', None)
-        plt.show()
-        
-        fig, ax = plt.subplots()
-        trunk_curvs_change.plot_peaks(ax, trunk_curvs_filtered.list, 'y', 'b', None)
-        total_curvs_change.plot_peaks(ax, total_curvs_filtered.list, 'y', 'b', None)
-        plt.show()
-        
-        
         fig, (total_curvs_filtered_ax, tail_angles_ax, turn_ax, accel_ax) = plt.subplots(4, sharex=True)
         tail_positive_angles_change.plot_peaks(tail_angles_ax, tail_angles.list, 'y', 'b', None)
         tail_negative_angles_change.plot_peaks(tail_angles_ax, tail_angles.list, None, 'r', None)
@@ -805,15 +1047,173 @@ for file in os.listdir('.'):
         plt.show()
         
         plt.figure('correlation')
-        
-        turn_avg_p.plot_peaks(turn_avg.b, 'b', None)
-        tail_angles_change_avg_p.plot_peaks(tail_angles_avg.b, 'g', None)
-        plt.show()
-        
         '''
-    '''
+        
+        fig, ax = plt.subplots()
+        #ax.plot(turns.original_list, c='y')
+        ax.plot(turns.list)
+        scatter_x = [turns_p_data[i].peakpos for i in range(turns_p_count)]
+        scatter_y = [turns.list[turns_p_data[i].peakpos] for i in range(turns_p_count)]
+        ax.scatter(scatter_x, scatter_y, c='b', marker='o')
+        for i in range(turns_p_count):
+            y = [turns.list[j] for j in range(turns_p_data[i].start, turns_p_data[i].end + 1)]
+            x = [j for j in range(turns_p_data[i].start, turns_p_data[i].end + 1)]
+            ax.plot(x, y, c='b')
+        scatter_x = [turns_n_data[i].peakpos for i in range(turns_n_count)]
+        scatter_y = [turns.list[turns_n_data[i].peakpos] for i in range(turns_n_count)]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        for i in range(turns_n_count):
+            y = [turns.list[j] for j in range(turns_n_data[i].start, turns_n_data[i].end + 1)]
+            x = [j for j in range(turns_n_data[i].start, turns_n_data[i].end + 1)]
+            ax.plot(x, y, c='r')
+        
+        fig, ax = plt.subplots()
+        ax.plot(tail_angles.list)
+        ax.plot(tail_angles_ddt.list, c='y')
+        for i in range(tail_angles_p_count):
+            ax.plot([j for j in range(tail_angles_p_data[i].start, tail_angles_p_data[i].peakpos + 1)],
+                    [tail_angles.list[j] for j in range(tail_angles_p_data[i].start, tail_angles_p_data[i].peakpos + 1)],
+                     c='b')
+        for i in range(tail_angles_n_count):
+            ax.plot([j for j in range(tail_angles_n_data[i].start, tail_angles_n_data[i].peakpos + 1)],
+                    [tail_angles.list[j] for j in range(tail_angles_n_data[i].start, tail_angles_n_data[i].peakpos + 1)],
+                     c='r')
+        
+        fig, ax = plt.subplots()
+        ax.plot(trunk_angles.list)
+        ax.plot(trunk_angles_ddt.list, c='y')
+        for i in range(trunk_angles_p_count):
+            ax.plot([j for j in range(trunk_angles_p_data[i].start, trunk_angles_p_data[i].peakpos + 1)],
+                    [trunk_angles.list[j] for j in range(trunk_angles_p_data[i].start, trunk_angles_p_data[i].peakpos + 1)],
+                     c='b')
+        for i in range(trunk_angles_n_count):
+            ax.plot([j for j in range(trunk_angles_n_data[i].start, trunk_angles_n_data[i].peakpos + 1)],
+                    [trunk_angles.list[j] for j in range(trunk_angles_n_data[i].start, trunk_angles_n_data[i].peakpos + 1)],
+                     c='r')
+        
+        fig, ax = plt.subplots()
+        ax.plot(amplitudes.list)
+        ax.plot(amplitudes_ddt.list, c='y')
+        for i in range(amplitudes_p_count):
+            ax.plot([j for j in range(amplitudes_p_data[i].start, amplitudes_p_data[i].peakpos + 1)],
+                    [amplitudes.list[j] for j in range(amplitudes_p_data[i].start, amplitudes_p_data[i].peakpos + 1)],
+                     c='b')
+        for i in range(amplitudes_n_count):
+            ax.plot([j for j in range(amplitudes_n_data[i].start, amplitudes_n_data[i].peakpos + 1)],
+                    [amplitudes.list[j] for j in range(amplitudes_n_data[i].start, amplitudes_n_data[i].peakpos + 1)],
+                     c='r')
+        
+        fig, ax = plt.subplots()
+        ax.plot(trunk_angles.list)
+        ax.plot([(i / 10) for i in turns.list], c='g')
+        ax.plot([(i / 20) for i in speeds.list], c='r')
+        
+        fig, ax = plt.subplots()
+        ax.plot(trunk_curvs_filtered.list)
+        for i in range(trunk_curvs_count):
+            ax.plot([j for j in range(trunk_curvs_data[i].start, trunk_curvs_data[i].end + 1)],
+                    [trunk_curvs_filtered.list[j] for j in range(trunk_curvs_data[i].start, trunk_curvs_data[i].end + 1)],
+                    c='r')
+        scatter_x = [trunk_curvs_data[i].peakpos for i in range(trunk_curvs_count)]
+        scatter_y = [trunk_curvs_filtered.list[trunk_curvs_data[i].peakpos] for i in range(trunk_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        
+        fig, ax = plt.subplots()
+        ax.plot(total_curvs_filtered.list)
+        for i in range(total_curvs_count):
+            ax.plot([j for j in range(total_curvs_data[i].start, total_curvs_data[i].end + 1)],
+                    [total_curvs_filtered.list[j] for j in range(total_curvs_data[i].start, total_curvs_data[i].end + 1)],
+                    c='r')
+        scatter_x = [total_curvs_data[i].peakpos for i in range(total_curvs_count)]
+        scatter_y = [total_curvs_filtered.list[total_curvs_data[i].peakpos] for i in range(total_curvs_count)]
+        ax.scatter(scatter_x, scatter_y, c='r', marker='o')
+        
+        with open(path + '/' + videoname + '_turns.csv', 'w', newline='') as f:
+            fieldnames = ['start', 'length', 'end', 'peakpos', 'uplength', 'height',
+                          'upheight', 'auc', 'maxslope', 'maxslopepos']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(turns_count):
+                writer.writerow({'start': turns_data[i].start,
+                                 'length': turns_data[i].length,
+                                 'end': turns_data[i].end,
+                                 'peakpos': turns_data[i].peakpos,
+                                 'uplength': turns_data[i].uplength,
+                                 'height': turns_data[i].height,
+                                 'upheight': turns_data[i].upheight,
+                                 'auc': turns_data[i].auc,
+                                 'maxslope': turns_data[i].maxslope,
+                                 'maxslopepos': turns_data[i].maxslopepos})
+        
+        with open(path + '/' + videoname + '_trunk_angles.csv', 'w', newline='') as f:
+            fieldnames = ['start', 'peakpos', 'uplength', 'height', 'upheight']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(trunk_angles_count):
+                writer.writerow({'start': trunk_angles_data[i].start,
+                                 'peakpos': trunk_angles_data[i].peakpos,
+                                 'uplength': trunk_angles_data[i].uplength,
+                                 'height': trunk_angles_data[i].height,
+                                 'upheight': trunk_angles_data[i].upheight})
+        
+        with open(path + '/' + videoname + '_tail_angles.csv', 'w', newline='') as f:
+            fieldnames = ['start', 'peakpos', 'uplength', 'height', 'upheight']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(tail_angles_count):
+                writer.writerow({'start': tail_angles_data[i].start,
+                                 'peakpos': tail_angles_data[i].peakpos,
+                                 'uplength': tail_angles_data[i].uplength,
+                                 'height': tail_angles_data[i].height,
+                                 'upheight': tail_angles_data[i].upheight})
+        
+        with open(path + '/' + videoname + '_amplitudes.csv', 'w', newline='') as f:
+            fieldnames = ['start', 'peakpos', 'uplength', 'height', 'upheight']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(amplitudes_count):
+                writer.writerow({'start': amplitudes_data[i].start,
+                                 'peakpos': amplitudes_data[i].peakpos,
+                                 'uplength': amplitudes_data[i].uplength,
+                                 'height': amplitudes_data[i].height,
+                                 'upheight': amplitudes_data[i].upheight})
+                
+        with open(path + '/' + videoname + '_trunk_curvs.csv', 'w', newline='') as f:
+            fieldnames = ['start', 'length', 'end', 'peakpos', 'uplength', 'height',
+                          'upheight', 'auc', 'maxslope', 'maxslopepos']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(trunk_curvs_count):
+                writer.writerow({'start': trunk_curvs_data[i].start,
+                                 'length': trunk_curvs_data[i].length,
+                                 'end': trunk_curvs_data[i].end,
+                                 'peakpos': trunk_curvs_data[i].peakpos,
+                                 'uplength': trunk_curvs_data[i].uplength,
+                                 'height': trunk_curvs_data[i].height,
+                                 'upheight': trunk_curvs_data[i].upheight,
+                                 'auc': trunk_curvs_data[i].auc,
+                                 'maxslope': trunk_curvs_data[i].maxslope,
+                                 'maxslopepos': trunk_curvs_data[i].maxslopepos})
+        
+        with open(path + '/' + videoname + '_total_curvs.csv', 'w', newline='') as f:
+            fieldnames = ['start', 'length', 'end', 'peakpos', 'uplength', 'height',
+                          'upheight', 'auc', 'maxslope', 'maxslopepos']
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            for i in range(total_curvs_count):
+                writer.writerow({'start': total_curvs_data[i].start,
+                                 'length': total_curvs_data[i].length,
+                                 'end': total_curvs_data[i].end,
+                                 'peakpos': total_curvs_data[i].peakpos,
+                                 'uplength': total_curvs_data[i].uplength,
+                                 'height': total_curvs_data[i].height,
+                                 'upheight': total_curvs_data[i].upheight,
+                                 'auc': total_curvs_data[i].auc,
+                                 'maxslope': total_curvs_data[i].maxslope,
+                                 'maxslopepos': total_curvs_data[i].maxslopepos})
+        
     with open(path + '/' + videoname + '_analysis.csv', 'w') as f:
         for key in analysis:
             f.write(key + ', ' + str(analysis[key]) + '\n')
     print('Analysis of ' + videoname + ' complete.')
-    '''
+    
