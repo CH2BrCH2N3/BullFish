@@ -4,14 +4,14 @@ import matplotlib.pyplot as plt
 import math
 from sys import exit
 from scipy.signal import find_peaks
-from copy import copy, deepcopy
+from copy import copy
 from decimal import Decimal
 from statistics import median
 pi = Decimal(math.pi)
 
 if not os.path.exists('bullfish_analysis_settings.csv'):
     with open('bullfish_analysis_settings.csv', 'w') as f:
-        headers = ['tank_x', 'tank_y', 'plot_figure', 'export', 'sampling', 'accel_cutoff',
+        headers = ['tank_x', 'tank_y', 'plot_figure', 'sampling', 'accel_cutoff',
                    'min_accel_dur', 'min_max_accel', 'min_speed_change', 'spine_analysis',
                    'turn_cutoff', 'min_turn_dur', 'min_max_turn_velocity',
                    'min_turn_angle', 'bend_cutoff', 'min_bend_dur', 'min_bend_speed',
@@ -27,7 +27,6 @@ else:
     tank_x = Decimal(settings['tank_x'])
     tank_y = Decimal(settings['tank_y'])
     plot_figure = bool(int(settings['plot_figure']))
-    export = bool(int(settings['export']))
     sampling = int(settings['sampling'])
     accel_cutoff = Decimal(settings['accel_cutoff'])
     min_accel_dur = Decimal(settings['min_accel_dur'])
@@ -74,7 +73,6 @@ def cal_preference(p, n):
     try:
         return (p - n) / (p + n)
     except:
-        print('cal_preference Error')
         return 0
 
 class list_set:
@@ -499,8 +497,7 @@ for file in os.listdir('.'):
         'max_accel_dur': max_accel_dur
     })
     
-    if export:
-        export_data(accels_data, path + '/' + videoname + '_accels.csv')
+    export_data(accels_data, path + '/' + videoname + '_accels.csv')
     
     if spine_analysis:
         
@@ -1075,6 +1072,8 @@ for file in os.listdir('.'):
         for kind_criterion in kind_criteria:
             calculations = steps_calculate(steps, kind_criterion)
             for properti in calculations.keys():
+                count = calculations[properti]['count']
+                calculations[properti].pop('count')
                 for calculation in calculations[properti].keys():
                     steps_calculation = {'operation': 'calculation'}
                     steps_calculation.update(kind_criterion)
@@ -1084,6 +1083,14 @@ for file in os.listdir('.'):
                         'value': calculations[properti][calculation]
                         })
                     steps_calculations.append(steps_calculation)
+            steps_calculation = {'operation': 'calculation'}
+            steps_calculation.update(kind_criterion)
+            steps_calculation.update({
+                'property': '',
+                'calculation': 'count',
+                'value': count
+                })
+            steps_calculations.append(steps_calculation)
         
         steps_comparisons = []
         for steps_calculation in steps_calculations:
@@ -1156,9 +1163,7 @@ for file in os.listdir('.'):
         meandering_operation = search_value(steps_calculations, meandering_dict)
         meandering = meandering_operation['value'] / total_distance
         
-        analysis.update({
-            'meandering': meandering
-        })
+        analysis.update({'meandering': meandering})
         
         export_data(steps_calculations, path + '/' + videoname + '_steps_calculations.csv')
         export_data(steps_comparisons, path + '/' + videoname + '_steps_comparisons.csv')
@@ -1194,7 +1199,8 @@ for file in os.listdir('.'):
                     name += (name_part + '_')
             for key in steps_correlation.keys():
                 if 'value' in key:
-                    analysis.update({name: steps_correlation[key]})
+                    value_name = name + key
+                    analysis.update({value_name: steps_correlation[key]})
         
     with open(path + '/' + videoname + '_analysis.csv', 'w') as f:
         for key in analysis:
