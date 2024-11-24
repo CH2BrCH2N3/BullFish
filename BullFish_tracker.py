@@ -4,7 +4,8 @@ import csv
 import cv2 as cv
 import numpy as np
 import math
-from time import time, sleep
+import datetime
+from copy import deepcopy
 
 class settings:
     def __init__(self, default):
@@ -12,7 +13,7 @@ class settings:
         self.user_set = default
         self.current = default
 skip_opening = settings(0)
-ask_skip = settings(1)
+skip_video = settings(1)
 video_start = settings(-1)
 video_end = settings(-1)
 rotate = settings(181)
@@ -36,16 +37,15 @@ auto_bg = settings(1)
 fish_cover_size = settings(1.5)
 threshold2_reduction = settings(0)
 tail2_range = settings(90)
-show_errors = settings(1)
 turn_max = settings(6000)
 save_annotatedvideo = settings('MJPG')
 if os.path.exists('bullfish_tracker_settings.csv'):
-    with open('bullfish_tracker_settings.csv', 'r') as f:
-        settings_dict = {row[0]: row[1] for row in csv.reader(f)}
-        print('bullfish_tracker_settings.csv is opened for the settings.')
+    print('bullfish_tracker_settings.csv is opened for the settings.')
     try:
+        with open('bullfish_tracker_settings.csv', 'r') as f:
+            settings_dict = {row[0]: row[1] for row in csv.reader(f)}
         skip_opening.user_set = int(settings_dict['skip_opening'])
-        ask_skip.user_set = int(settings_dict['ask_skip'])
+        skip_video.user_set = int(settings_dict['skip_video'])
         video_start.user_set = int(settings_dict['video_start'])
         video_end.user_set = int(settings_dict['video_end'])
         rotate.user_set = int(settings_dict['rotate'])
@@ -69,7 +69,6 @@ if os.path.exists('bullfish_tracker_settings.csv'):
         fish_cover_size.user_set = float(settings_dict['fish_cover_size'])
         threshold2_reduction.user_set = float(settings_dict['threshold2_reduction'])
         tail2_range.user_set = float(settings_dict['tail2_range'])
-        show_errors.user_set = int(settings_dict['show_errors'])
         turn_max.user_set = float(settings_dict['turn_max'])
         save_annotatedvideo.user_set = settings_dict['save_annotatedvideo']
     except Exception:
@@ -78,7 +77,7 @@ if os.path.exists('bullfish_tracker_settings.csv'):
 else:
     print('bullfish_tracker_settings.csv cannot be found.')
     settings_dict = {'skip_opening': skip_opening.user_set,
-                     'ask_skip': ask_skip.user_set,
+                     'skip_video': skip_video.user_set,
                      'video_start': video_start.user_set,
                      'video_end': video_end.user_set,
                      'rotate': rotate.user_set,
@@ -102,7 +101,6 @@ else:
                      'fish_cover_size': fish_cover_size.user_set,
                      'threshold2_reduction': threshold2_reduction.user_set,
                      'tail2_range': tail2_range.user_set,
-                     'show_errors': show_errors.user_set,
                      'turn_max': turn_max.user_set,
                      'save_annotatedvideo': save_annotatedvideo.user_set}
     with open('bullfish_tracker_settings.csv', 'w') as f:
@@ -181,7 +179,7 @@ for file in os.listdir('.'):
         print(filename + ' cannot be opened.')
         continue
     print('\nOpening ' + filename + ' ...')
-    if ask_skip.user_set and input('Enter s to skip inspecting this video, any other things to continue:') == 's':
+    if skip_video.user_set and input('Enter s to skip this video, any other things to continue:') == 's':
         print(filename + ' skipped.')
         continue
     videofilenames.append(filename)
@@ -232,6 +230,8 @@ for file in os.listdir('.'):
             ret, frame1 = video.read()
             cv.imwrite(videoname + '_Frame1.png', frame1)
             video.release()
+            print('The first frame of the selected video segment has been saved at the current directory.')
+            print('The following part is to set the parameters for rotating and cropping the video to prepare for tracking.')
             if rotate.user_set == 181:
                 rotate.current = get_input(float, 'What is the video rotation angle?')
             else:
@@ -261,7 +261,7 @@ for file in os.listdir('.'):
                     if crop_x.current != 0 and crop_y.current != 0:
                         frame_t = frame_t[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
                     cv.imwrite(videoname + '_edited_frame.png', frame_t)
-                    if input('The edited frame is saved. Enter f to carry on, others to change:') == 'f':
+                    if input('The rotated and cropped frame is saved. Enter f to carry on, others to change:') == 'f':
                         break
                 except Exception:
                     print('An error occurred when editing the frame. Change parameters.')
@@ -292,7 +292,7 @@ for file in os.listdir('.'):
             else:
                 swimarea_y.current = swimarea_y.user_set
             while check.user_set:
-                frame_l = frame_t
+                frame_l = deepcopy(frame_t)
                 cv.rectangle(frame_l, (swimarea_tlx.current, swimarea_tly.current),
                              (swimarea_tlx.current + swimarea_x.current, swimarea_tly.current + swimarea_y.current), (0, 0, 255), 3)
                 cv.imwrite(videoname + '_labeled_frame.png', frame_l)
@@ -397,8 +397,6 @@ def cal_direction_change(s1, s2): #from s1 to s2
     else:
         return direction_change
 
-start_time = time()
-
 for filename in videofilenames:
         
     try:
@@ -500,7 +498,7 @@ for filename in videofilenames:
                         frame_t = frame_t[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
                     
                     blurred_frame = frame_t
-                    if ksize.user_set > 0:
+                    if ksize.user_set >= 0:
                         blurred_frame = cv.GaussianBlur(frame_t, (ksize.user_set, ksize.user_set), 0)
                     
                     threshold1s[i] = max_entropy_threshold(blurred_frame, threshold1_reduction.user_set)
@@ -629,7 +627,7 @@ for filename in videofilenames:
                         
                         frame_d = 255 - cv.absdiff(frame_t, background)
                         blurred_frame = frame_d
-                        if ksize.user_set > 0:
+                        if ksize.user_set >= 0:
                             blurred_frame = cv.GaussianBlur(frame_d, (ksize.user_set, ksize.user_set), 0)
                         threshold2s[i] = max_entropy_threshold(blurred_frame, threshold2_reduction.user_set)
                         
@@ -638,7 +636,6 @@ for filename in videofilenames:
                         break
             
                     print('\rt2_sampling progress: ', i, '/', l, end = '')
-                    #sleep(0.2)
                     j += t_sampling
                     i += t_sampling
                 
@@ -662,7 +659,7 @@ for filename in videofilenames:
             binary1 = cv.VideoWriter(path + '/' + videoname + '_t1.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
             if spine_analysis.user_set:
                 binary2 = cv.VideoWriter(path + '/' + videoname + '_t2.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
-        if save_annotatedvideo.user_set:
+        if save_annotatedvideo.user_set != '0':
             c = save_annotatedvideo.user_set
             annotated = cv.VideoWriter(path + '/' + videoname + '_a.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current))
             
@@ -698,7 +695,7 @@ for filename in videofilenames:
                     aframe = cv.cvtColor(frame_t, cv.COLOR_GRAY2BGR)
                 
                 blurred_frame = frame_t
-                if ksize.user_set > 0:
+                if ksize.user_set >= 0:
                     blurred_frame = cv.GaussianBlur(frame_t, (ksize.user_set, ksize.user_set), 0)
                 ret, t1frame = cv.threshold(blurred_frame, threshold1s[i], 255, cv.THRESH_BINARY_INV)
                 
@@ -715,7 +712,7 @@ for filename in videofilenames:
                 
                 s1frame = np.zeros((y_current, x_current), dtype = np.uint8)
                 cv.drawContours(s1frame, contours1, max_contour1_index, 255, -1)
-                if save_binaryvideo.user_set:
+                if save_binaryvideo.user_set != '0':
                     binary1.write(s1frame)
                 
                 moment = cv.moments(fish_contour1)
@@ -781,10 +778,10 @@ for filename in videofilenames:
                     
                     frame_d = 255 - cv.absdiff(frame_t, background)
                     blurred_frame = frame_d
-                    if ksize.user_set > 0:
+                    if ksize.user_set >= 0:
                         blurred_frame = cv.GaussianBlur(frame_d, (ksize.user_set, ksize.user_set), 0)
                     ret, t2frame = cv.threshold(blurred_frame, threshold2s[i], 255, cv.THRESH_BINARY_INV)
-                    if save_binaryvideo.user_set:
+                    if save_binaryvideo.user_set != '0':
                         binary2.write(t2frame)
                     
                     tail1_direction = cal_direction(spine[i][0], spine[i][1])
@@ -817,7 +814,7 @@ for filename in videofilenames:
                         tails[i] = spine[i][0]
                         tail_missing_frames.append(i)
                 
-                if save_annotatedvideo.user_set:
+                if save_annotatedvideo.user_set != '0':
                     cv.circle(aframe, (int(cen[i][0]), int(cen[i][1])), 3, (0, 255, 255), -1)
                     if spine_analysis:
                         for ii in range(fish_perimeters[i]):
@@ -842,11 +839,11 @@ for filename in videofilenames:
         
         print()
         video.release()
-        if save_binaryvideo.user_set:
+        if save_binaryvideo.user_set != '0':
             binary1.release()
             if spine_analysis.user_set:
                 binary2.release() 
-        if save_annotatedvideo.user_set:
+        if save_annotatedvideo.user_set != '0':
             annotated.release()
         
         metadata.update({
@@ -861,10 +858,9 @@ for filename in videofilenames:
             'fish_cover_size': fish_cover_size.user_set,
             'threshold2_reduction': threshold2_reduction.user_set,
             'tail2_range': tail2_range.current,
-            'show_errors': show_errors.user_set,
             'turn_max': turn_max.current,
             'save_annotatedvideo': save_annotatedvideo.user_set,
-            'version': 1.1
+            'date': datetime.datetime.now()
         })
         with open(path + '/' + videoname + '_metadata.csv', 'w') as f:
             for key in metadata:
@@ -948,5 +944,3 @@ for filename in videofilenames:
         
         print('An error occurred when processing ' + videoname + ':')
         traceback.print_exc()
-
-print('Runtime: ' + str(time() - start_time))
