@@ -1,337 +1,34 @@
 import os
-import traceback
 import csv
+import math
 import cv2 as cv
 import numpy as np
-import math
-import datetime
 from copy import deepcopy
+from traceback import print_exc
+from BullFish_pkg.general import csvtodict, load_settings
+from BullFish_pkg.math import pyth, cal_direction, cal_direction_change
+from BullFish_pkg.cv_editing import get_rm, frame_rotate
 
-class settings:
-    def __init__(self, default):
-        self.default = default
-        self.user_set = default
-        self.current = default
-skip_opening = settings(0)
-skip_video = settings(1)
-video_start = settings(-1)
-video_end = settings(-1)
-rotate = settings(181)
-crop_tlx = settings(-1)
-crop_tly = settings(-1)
-crop_x = settings(-1)
-crop_y = settings(-1)
-swimarea_tlx = settings(-1)
-swimarea_tly = settings(-1)
-swimarea_x = settings(-1)
-swimarea_y = settings(-1)
-check = settings(1)
-downsampling = settings(1)
-ksize = settings(5)
-t_sampling_time = settings(0.2)
-threshold1_reduction = settings(10)
-save_binaryvideo = settings('FFV1')
-spine_analysis = settings(1)
-contour_points_dist = settings(12)
-auto_bg = settings(1)
-fish_cover_size = settings(1.5)
-threshold2_reduction = settings(0)
-tail2_range = settings(90)
-turn_max = settings(6000)
-save_annotatedvideo = settings('MJPG')
-if os.path.exists('bullfish_tracker_settings.csv'):
-    print('bullfish_tracker_settings.csv is opened for the settings.')
-    try:
-        with open('bullfish_tracker_settings.csv', 'r') as f:
-            settings_dict = {row[0]: row[1] for row in csv.reader(f)}
-        skip_opening.user_set = int(settings_dict['skip_opening'])
-        skip_video.user_set = int(settings_dict['skip_video'])
-        video_start.user_set = int(settings_dict['video_start'])
-        video_end.user_set = int(settings_dict['video_end'])
-        rotate.user_set = int(settings_dict['rotate'])
-        crop_tlx.user_set = int(settings_dict['crop_tlx'])
-        crop_tly.user_set = int(settings_dict['crop_tly'])
-        crop_x.user_set = int(settings_dict['crop_x'])
-        crop_y.user_set = int(settings_dict['crop_y'])
-        swimarea_tlx.user_set = int(settings_dict['swimarea_tlx'])
-        swimarea_tly.user_set = int(settings_dict['swimarea_tly'])
-        swimarea_x.user_set = int(settings_dict['swimarea_x'])
-        swimarea_y.user_set = int(settings_dict['swimarea_y'])
-        check.user_set = int(settings_dict['check'])
-        downsampling.user_set = int(settings_dict['downsampling'])
-        ksize.user_set = int(settings_dict['k_size'])
-        t_sampling_time.user_set = float(settings_dict['t_sampling_time'])
-        threshold1_reduction.user_set = float(settings_dict['threshold1_reduction'])
-        save_binaryvideo.user_set = settings_dict['save_binaryvideo']
-        spine_analysis.user_set = int(settings_dict['spine_analysis'])
-        contour_points_dist.user_set = int(settings_dict['contour_points_dist'])
-        auto_bg.user_set = int(settings_dict['auto_bg'])
-        fish_cover_size.user_set = float(settings_dict['fish_cover_size'])
-        threshold2_reduction.user_set = float(settings_dict['threshold2_reduction'])
-        tail2_range.user_set = float(settings_dict['tail2_range'])
-        turn_max.user_set = float(settings_dict['turn_max'])
-        save_annotatedvideo.user_set = settings_dict['save_annotatedvideo']
-    except Exception:
-        traceback.print_exc()
-        print('Some of the settings cannot be found.\nDefault settings are used.')
-else:
-    print('bullfish_tracker_settings.csv cannot be found.')
-    settings_dict = {'skip_opening': skip_opening.user_set,
-                     'skip_video': skip_video.user_set,
-                     'video_start': video_start.user_set,
-                     'video_end': video_end.user_set,
-                     'rotate': rotate.user_set,
-                     'crop_tlx': crop_tlx.user_set,
-                     'crop_tly': crop_tly.user_set,
-                     'crop_x': crop_x.user_set,
-                     'crop_y': crop_y.user_set,
-                     'swimarea_tlx': swimarea_tlx.user_set,
-                     'swimarea_tly': swimarea_tly.user_set,
-                     'swimarea_x': swimarea_x.user_set,
-                     'swimarea_y': swimarea_y.user_set,
-                     'check': check.user_set,
-                     'downsampling': downsampling.user_set,
-                     'k_size': ksize.user_set,
-                     't_sampling_time': t_sampling_time.user_set,
-                     'threshold1_reduction': threshold1_reduction.user_set,
-                     'save_binaryvideo': save_binaryvideo.user_set,
-                     'spine_analysis': spine_analysis.user_set,
-                     'contour_points_dist': contour_points_dist.user_set,
-                     'auto_bg': auto_bg.user_set,
-                     'fish_cover_size': fish_cover_size.user_set,
-                     'threshold2_reduction': threshold2_reduction.user_set,
-                     'tail2_range': tail2_range.user_set,
-                     'turn_max': turn_max.user_set,
-                     'save_annotatedvideo': save_annotatedvideo.user_set}
-    with open('bullfish_tracker_settings.csv', 'w') as f:
-        for key in settings_dict:
-            f.write(key + ',' + str(settings_dict[key]) + '\n')
-    print('Default settings are created.')
-if not skip_opening.user_set:
-    if input('Enter e to exit the program to edit settings, others to continue:') == 'e':
-        from sys import exit
-        exit()
-turn_max.current = turn_max.user_set * math.pi / 180
-tail2_range.current = tail2_range.user_set * math.pi / 180
+default_settings = {
+    "ksize": 5,
+    "t_sampling_time": 0.2,
+    "threshold1_reduction": 10,
+    "save_binaryvideo": "FFV1",
+    "save_annotatedvideo": "MJPG",
+    "spine_analysis": 1,
+    "contour_points_dist": 12,
+    "turn_max": 6000,
+    "show_errors": 1,
+    'find_tip': 1,
+    "auto_bg": 1,
+    "fish_cover_size": 1.5,
+    "threshold2_reduction": 0,
+    "tail2_range": 45
+}
 
-def create_path(path):
-    if not os.path.exists(path):
-        os.mkdir(path)
+print('Welcome to BullFish_tracker.')
 
-def get_input(t, prompt):
-    while True:
-        inputs = input(prompt)
-        try:
-            return t(inputs)
-        except Exception as error:
-            print(error)
-            print('...Try again')     
-
-def get_rm(x, y, angle):
-    if angle > -180 and angle < -135:
-        return cv.getRotationMatrix2D((x, y), -(angle + 180), 1.0)
-    elif angle >= -135 and angle < -45 and angle != -90:
-        return cv.getRotationMatrix2D((y, x), -(angle + 90), 1.0)
-    elif angle >= -45 and angle < 45 and angle != 0:
-        return cv.getRotationMatrix2D((x, y), -angle, 1.0)
-    elif angle >= 45 and angle < 135 and angle != 90:
-        return cv.getRotationMatrix2D((y, x), -(angle - 90), 1.0)
-    elif angle >= 135 and angle < 180:
-        return cv.getRotationMatrix2D((x, y), -(angle - 180), 1.0)
-    else:
-        return None
-
-def frame_rotate(frame, x, y, angle, rm):
-    if angle > -180 and angle < -135:
-        frame_t = cv.rotate(frame, cv.ROTATE_180)
-        return cv.warpAffine(frame_t, rm, (x, y))
-    elif angle >= -135 and angle < -45 and angle != -90:
-        frame_t = cv.rotate(frame, cv.ROTATE_90_COUNTERCLOCKWISE)
-        return cv.warpAffine(frame_t, rm, (y, x))
-    elif angle == -90:
-        return cv.rotate(frame, cv.ROTATE_90_COUNTERCLOCKWISE)
-    elif angle >= -45 and angle < 45 and angle != 0:
-        return cv.warpAffine(frame, rm, (x, y))
-    elif angle >= 45 and angle < 135 and angle != 90:
-        frame_t = cv.rotate(frame, cv.ROTATE_90_CLOCKWISE)
-        return cv.warpAffine(frame_t, rm, (y, x))
-    elif angle == 90:
-        return cv.rotate(frame, cv.ROTATE_90_CLOCKWISE)
-    elif angle >= 135 and angle < 180:
-        frame_t = cv.rotate(frame, cv.ROTATE_180)
-        return cv.warpAffine(frame_t, rm, (x, y))
-    elif angle == 180:
-        return cv.rotate(frame, cv.ROTATE_180)
-    else:
-        return frame
-
-videofilenames = []
-metadata = {}
-for file in os.listdir('.'):
-     
-    filename = os.fsdecode(file)
-    filename_split = os.path.splitext(filename)
-    supported_formats = ['.avi', '.mp4']
-    if filename_split[1] not in supported_formats:
-        continue
-    video = cv.VideoCapture(filename)
-    if not video.isOpened():
-        print(filename + ' cannot be opened.')
-        continue
-    print('\nOpening ' + filename + ' ...')
-    if skip_video.user_set and input('Enter s to skip this video, any other things to continue:') == 's':
-        print(filename + ' skipped.')
-        continue
-    videofilenames.append(filename)
-    
-    try:
-        
-        videoname = filename_split[0]
-        path = './' + videoname
-        create_path(path)
-        
-        x_original = int(video.get(cv.CAP_PROP_FRAME_WIDTH))
-        y_original = int(video.get(cv.CAP_PROP_FRAME_HEIGHT))
-        framenumber_original = int(video.get(cv.CAP_PROP_FRAME_COUNT))
-        fps = video.get(cv.CAP_PROP_FPS) / downsampling.user_set
-        
-        create_metadata = True
-        if os.path.exists(path + '/' + videoname + '_metadata.csv'):
-            while True:
-                response = input(videoname + '_metadata.csv' + ' already exists. Enter y to use the existing metadata. Enter o to overwrite the metadata.')
-                if response == 'y':        
-                    create_metadata = False
-                elif response != 'o':
-                    print('Try again')
-                    continue
-                break
-        
-        if create_metadata:
-            
-            print('Creating metadata for ' + videoname + '...')
-            
-            if video_start.user_set == -1:
-                video_start.current = get_input(int, 'What is the starting frame?')
-            else:
-                video_start.current = video_start.user_set
-            if video_end.user_set == -1:
-                video_end.current = get_input(int, 'What is the ending frame?')
-            else:
-                video_end.current = video_end.user_set
-            while True:
-                if video_end.current < framenumber_original and video_start.current < video_end.current:
-                    break
-                else:
-                    print('Unacceptable range. Choose again.')
-                    video_start.current = get_input(int, 'What is the starting frame?')
-                    video_end.current = get_input(int, 'What is the ending frame?')
-            
-            video.set(cv.CAP_PROP_POS_FRAMES, video_start.current)
-            ret, frame1 = video.read()
-            cv.imwrite(videoname + '_Frame1.png', frame1)
-            video.release()
-            print('The first frame of the selected video segment has been saved at the current directory.')
-            print('The following part is to set the parameters for rotating and cropping the video to prepare for tracking.')
-            if rotate.user_set == 181:
-                rotate.current = get_input(float, 'What is the video rotation angle?')
-            else:
-                rotate.current = rotate.user_set
-            if crop_tlx.user_set == -1:
-                crop_tlx.current = get_input(int, 'Enter the x-coordinate of the top-left corner of the cropping area:')
-            else:
-                crop_tlx.current = crop_tlx.user_set
-            if crop_tly.user_set == -1:
-                crop_tly.current = get_input(int, 'Enter the y-coordinate of the top-left corner of the cropping area:')
-            else:
-                crop_tly.current = crop_tly.user_set
-            if crop_x.user_set == -1:
-                crop_x.current = get_input(int, 'Enter the width (x) of the cropping area:')
-            else:
-                crop_x.current = crop_x.user_set
-            if crop_y.user_set == -1:
-                crop_y.current = get_input(int, 'Enter the height (y) of the cropping area:')
-            else:
-                crop_y.current = crop_y.user_set
-            while check.user_set:
-                try:
-                    rm = get_rm(x_original, y_original, rotate.current)
-                    frame_t = frame_rotate(frame1, x_original, y_original, rotate.current, rm)
-                    crop_brx = crop_tlx.current + crop_x.current
-                    crop_bry = crop_tly.current + crop_y.current
-                    if crop_x.current != 0 and crop_y.current != 0:
-                        frame_t = frame_t[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
-                    cv.imwrite(videoname + '_edited_frame.png', frame_t)
-                    if input('The rotated and cropped frame is saved. Enter f to carry on, others to change:') == 'f':
-                        break
-                except Exception:
-                    print('An error occurred when editing the frame. Change parameters.')
-                    traceback.print_exc()
-                rotate.current = get_input(float, 'What is the video rotation angle?')
-                crop_tlx.current = get_input(int, 'Enter the x-coordinate of the top-left corner of the cropping area:')
-                crop_tly.current = get_input(int, 'Enter the y-coordinate of the top-left corner of the cropping area:')
-                crop_x.current = get_input(int, 'Enter the width (x) of the cropping area:')
-                crop_y.current = get_input(int, 'Enter the height (y) of the cropping area:')
-            size = frame_t.shape
-            x_current = size[1]
-            y_current = size[0]
-            
-            if swimarea_tlx.user_set == -1:
-                swimarea_tlx.current = get_input(int, 'Enter the x-coordinate of the top-left corner of the swimming area:')
-            else:
-                swimarea_tlx.current = swimarea_tlx.user_set
-            if swimarea_tly.user_set == -1:
-                swimarea_tly.current = get_input(int, 'Enter the y-coordinate of the top-left corner of the swimming area:')
-            else:
-                swimarea_tly.current = swimarea_tly.user_set
-            if swimarea_x.user_set == -1:
-                swimarea_x.current = get_input(int, 'Enter the width (x) of the swimming area:')
-            else:
-                swimarea_x.current = swimarea_x.user_set
-            if swimarea_y.user_set == -1:
-                swimarea_y.current = get_input(int, 'Enter the height (y) of the swimming area:')
-            else:
-                swimarea_y.current = swimarea_y.user_set
-            while check.user_set:
-                frame_l = deepcopy(frame_t)
-                cv.rectangle(frame_l, (swimarea_tlx.current, swimarea_tly.current),
-                             (swimarea_tlx.current + swimarea_x.current, swimarea_tly.current + swimarea_y.current), (0, 0, 255), 3)
-                cv.imwrite(videoname + '_labeled_frame.png', frame_l)
-                if input('The swimming area is labeled in a new figure. Enter f to carry on, others to change:') == 'f':
-                    break
-                swimarea_tlx.current = get_input(int, 'Enter the x-coordinate of the top-left corner of the swimming area:')
-                swimarea_tly.current = get_input(int, 'Enter the y-coordinate of the top-left corner of the swimming area:')
-                swimarea_x.current = get_input(int, 'Enter the width (x) of the swimming area:')
-                swimarea_y.current = get_input(int, 'Enter the height (y) of the swimming area:')
-            
-            metadata.update({
-                'filename': filename,
-                'fps': fps,
-                'x_original': x_original,
-                'y_original': y_original,
-                'video_start': video_start.current,
-                'video_end': video_end.current,
-                'rotate': rotate.current,
-                'crop_tlx': crop_tlx.current,
-                'crop_tly': crop_tly.current,
-                'crop_x': crop_x.current,
-                'crop_y': crop_y.current,
-                'x_current': x_current,
-                'y_current': y_current,
-                'swimarea_tlx': swimarea_tlx.current,
-                'swimarea_tly': swimarea_tly.current,
-                'swimarea_x': swimarea_x.current,
-                'swimarea_y': swimarea_y.current
-            })
-            
-            with open(path + '/' + videoname + '_metadata.csv', 'w') as f:
-                for key in metadata:
-                    f.write(key + ',' + str(metadata[key]) + '\n')
-            metadata.clear()
-                
-    except Exception:
-        
-        print('An error occurred when setting up ' + filename + ' for tracking:')
-        traceback.print_exc()
+settings = load_settings('tracker', default_settings)
 
 def max_entropy_threshold(image, threshold_reduction):
     hist, _ = np.histogram(image.ravel(), bins = 256, range=(0, 256))
@@ -376,32 +73,21 @@ def max_entropy_threshold(image, threshold_reduction):
         t += 1
     return round(tmax * (1 - threshold_reduction / 100))
 
-def pyth(point1, point2):
-    return math.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
-
 def sq_area(image, point, r):
-    return sum(sum(image[j][i] for i in range(point[0] - r, point[0] + r + 1)) for j in range(point[1] - r, point[1] + r + 1))
+    return sum(sum((1 if image[j][i] else 0) for i in range(point[0] - r, point[0] + r + 1)) for j in range(point[1] - r, point[1] + r + 1))
 
-def cal_direction(point1, point2): #from point1 to point2
-    if point1[0] == point2[0] and point1[1] == point2[1]:
-        return 0
-    else:
-        return math.atan2(point2[1] - point1[1], point2[0] - point1[0])
-
-def cal_direction_change(s1, s2): #from s1 to s2
-    direction_change = s2 - s1
-    if direction_change > math.pi:
-        return direction_change - math.pi * 2
-    elif direction_change <= -math.pi:
-        return direction_change + math.pi * 2
-    else:
-        return direction_change
-
-for filename in videofilenames:
+for file in os.listdir('.'):
         
     try:
-        video = cv.VideoCapture(filename)
+        filename = os.fsdecode(file)
         filename_split = os.path.splitext(filename)
+        supported_formats = {'.avi', '.mp4'}
+        if filename_split[1] not in supported_formats:
+            continue
+        video = cv.VideoCapture(filename)
+        if not video.isOpened():
+            print(filename + ' cannot be opened.')
+            continue
         videoname = filename_split[0]
         path = './' + videoname
         if not os.path.isfile(path + '/' + videoname + '_metadata.csv'):
@@ -410,82 +96,67 @@ for filename in videofilenames:
         print('\nProcessing ' + filename)
     except Exception:
         print('An error occurred when opening ' + videoname + ':')
-        traceback.print_exc()
+        print_exc()
         continue
     
     try:
-        metadata.clear()
-        with open(path + '/' + videoname + '_metadata.csv', 'r') as f:
-            metadata = {row[0]: row[1] for row in csv.reader(f)}
-            video_start.current = int(metadata['video_start'])
-            video_end.current = int(metadata['video_end'])
-            fps = float(metadata['fps'])
-            x_original = int(metadata['x_original'])
-            y_original = int(metadata['y_original'])
-            rotate.current = float(metadata['rotate'])
-            crop_tlx.current = int(metadata['crop_tlx'])
-            crop_tly.current = int(metadata['crop_tly'])
-            crop_x.current = int(metadata['crop_x'])
-            crop_y.current = int(metadata['crop_y'])
-            x_current = int(metadata['x_current'])
-            y_current = int(metadata['y_current'])
-            swimarea_tlx.current = int(metadata['swimarea_tlx'])
-            swimarea_tly.current = int(metadata['swimarea_tly'])
-            swimarea_x.current = int(metadata['swimarea_x'])
-            swimarea_y.current = int(metadata['swimarea_y'])
+        metadata = csvtodict(path + '/' + videoname + '_metadata.csv')
     except Exception:
         print('An error occurred when accessing the metadata of ' + videoname + ':')
-        traceback.print_exc()
+        print_exc()
         continue
     
     try:
         
-        rm = get_rm(x_original, y_original, rotate.current)
-        crop_brx = crop_tlx.current + crop_x.current
-        crop_bry = crop_tly.current + crop_y.current
+        rm = get_rm(metadata['x_original'], metadata['y_original'], metadata['rotate'])
+        crop_brx = metadata['crop_tlx'] + metadata['crop_x']
+        crop_bry = metadata['crop_tly'] + metadata['crop_y']
         
-        l = (video_end.current - video_start.current) // downsampling.user_set
-        j = video_start.current
+        l = (metadata['video_end'] - metadata['video_start']) // metadata['downsampling']
+        j = metadata['video_start']
         video.set(cv.CAP_PROP_POS_FRAMES, j)
         
-        t_sampling = round(t_sampling_time.user_set * fps)
+        t_sampling = settings['t_sampling_time'] * metadata['fps'] * metadata['downsampling'] # calculate threshold once every how many frames
         threshold1s = [0 for i in range(l)]
-        threshold2s = [0 for i in range(l)]
-        fish_areas = [0 for i in range(l)]
-        leftmosts = [0 for i in range(l)]
-        rightmosts = [0 for i in range(l)]
-        topmosts = [0 for i in range(l)]
-        bottommosts = [0 for i in range(l)]
+        if settings['find_tip']:
+            threshold2s = [0 for i in range(l)]
+            leftmosts = [0 for i in range(l)]
+            rightmosts = [0 for i in range(l)]
+            topmosts = [0 for i in range(l)]
+            bottommosts = [0 for i in range(l)]
         
         create_trackdata = True
-        if os.path.exists(path + '/' + videoname + '_trackdata.csv') and os.path.exists(path + '/' + videoname + '_background.png'):
+        if os.path.exists(path + '/' + videoname + '_trackdata.csv'):
             while True:
-                response = input('Skip create_trackdata? [y]/o')
+                response = input('Trackdata has already been created. Skip this step? [y]/o')
                 if response == 'y':        
                     with open(path + '/' + videoname + '_trackdata.csv', 'r') as f:
                         reader = csv.DictReader(f)
                         i = 0
                         for row in reader:
                             threshold1s[i] = int(row['threshold1'])
-                            fish_areas[i] = float(row['fish_area'])
-                            leftmosts[i] = int(row['leftmost'])
-                            rightmosts[i] = int(row['rightmost'])
-                            topmosts[i] = int(row['topmost'])
-                            bottommosts[i] = int(row['bottommost'])
-                            threshold2s[i] = int(row['threshold2'])
+                            if settings['find_tip']:
+                                leftmosts[i] = int(row['leftmost'])
+                                rightmosts[i] = int(row['rightmost'])
+                                topmosts[i] = int(row['topmost'])
+                                bottommosts[i] = int(row['bottommost'])
+                                threshold2s[i] = int(row['threshold2'])
                             i += 1
-                    background = cv.imread(path + '/' + videoname + '_background.png')
-                    background = cv.cvtColor(background, cv.COLOR_BGR2GRAY)
+                    if settings['find_tip']:
+                        print('Loading background...')
+                        background = cv.imread(path + '/' + videoname + '_background.png')
+                        background = cv.cvtColor(background, cv.COLOR_BGR2GRAY)
                     create_trackdata = False
                 elif response != 'o':
                     print('Try again')
                     continue
                 break
         
-        i = 0
         if create_trackdata:
             
-            while j < video_end.current:
+            i = 0
+            
+            while j < metadata['video_end']:
                 
                 video.set(cv.CAP_PROP_POS_FRAMES, j)
                 ret, frame = video.read()
@@ -493,66 +164,66 @@ for filename in videofilenames:
                 if ret:
                     
                     frame_t = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                    frame_t = frame_rotate(frame_t, x_original, y_original, rotate.current, rm)
-                    if crop_x.current != 0 and crop_y.current != 0:
-                        frame_t = frame_t[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
+                    frame_t = frame_rotate(frame_t, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
+                    if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
+                        frame_t = frame_t[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
                     
-                    blurred_frame = frame_t
-                    if ksize.user_set >= 0:
-                        blurred_frame = cv.GaussianBlur(frame_t, (ksize.user_set, ksize.user_set), 0)
+                    blurred_frame = deepcopy(frame_t)
+                    if settings['ksize'] >= 0:
+                        blurred_frame = cv.GaussianBlur(frame_t, (settings['ksize'], settings['ksize']), 0)
                     
-                    threshold1s[i] = max_entropy_threshold(blurred_frame, threshold1_reduction.user_set)
+                    threshold1s[i] = max_entropy_threshold(blurred_frame, settings['threshold1_reduction'])
                     ret, t1frame = cv.threshold(blurred_frame, threshold1s[i], 255, cv.THRESH_BINARY_INV)
                     
-                    contours, hierarchy = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
-                    contour_number = len(contours)
-                    max_perimeter = 0
-                    for ii in range(contour_number):
-                        contour_len = len(contours[ii])
-                        if contour_len > max_perimeter:
-                            max_perimeter = contour_len
-                            max_contour_index = ii
-                            fish_contour = contours[ii]
-                    leftmost = tuple(fish_contour[fish_contour[:,:,0].argmin()][0])
-                    rightmost = tuple(fish_contour[fish_contour[:,:,0].argmax()][0])
-                    topmost = tuple(fish_contour[fish_contour[:,:,1].argmin()][0])
-                    bottommost = tuple(fish_contour[fish_contour[:,:,1].argmax()][0])
-                    leftmosts[i] = leftmost[0]
-                    rightmosts[i] = rightmost[0]
-                    topmosts[i] = topmost[1]
-                    bottommosts[i] = bottommost[1]
-                    fish_areas[i] += cv.contourArea(fish_contour)
+                    if settings['find_tip']:
+                        contours, hierarchy = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
+                        contour_number = len(contours)
+                        max_perimeter = 0
+                        for ii in range(contour_number):
+                            contour_len = len(contours[ii])
+                            if contour_len > max_perimeter:
+                                max_perimeter = contour_len
+                                max_contour_index = ii
+                                fish_contour = contours[ii]
+                        leftmost = tuple(fish_contour[fish_contour[:,:,0].argmin()][0])
+                        rightmost = tuple(fish_contour[fish_contour[:,:,0].argmax()][0])
+                        topmost = tuple(fish_contour[fish_contour[:,:,1].argmin()][0])
+                        bottommost = tuple(fish_contour[fish_contour[:,:,1].argmax()][0])
+                        leftmosts[i] = leftmost[0]
+                        rightmosts[i] = rightmost[0]
+                        topmosts[i] = topmost[1]
+                        bottommosts[i] = bottommost[1]
             
                 else:
                 
                     break
         
-                print('\rt1_sampling progress: ', i, '/', l, end = '')
-                #sleep(0.2)
-                j += t_sampling
-                i += t_sampling
+                print('\rt1_sampling progress: ', i, '/', l, end='')
+                j = round(j + t_sampling)
+                i = round(i + t_sampling)
             
             print()
-        
-            i = t_sampling
+            
+            i = 1
+            start = 0
             while i < l:
-                start = i - t_sampling
-                j = start + 1
-                while j < i:
-                    threshold1s[j] = round((threshold1s[start] * (i - j) + threshold1s[i] * (j - start)) / t_sampling)
-                    fish_areas[j] = round((fish_areas[start] * (i - j) + fish_areas[i] * (j - start)) / t_sampling)
-                    j += 1
-                i += t_sampling
-            i = l - t_sampling
-            while i < l:
-                threshold1s[i] = threshold1s[l - t_sampling]
-                fish_areas[i] = fish_areas[l - t_sampling]
+                if threshold1s[i] != 0:
+                    j = start + 1
+                    while j < i:
+                        threshold1s[j] = round((threshold1s[start] * (i - j) + threshold1s[i] * (j - start)) / (i - start))
+                        j += 1
+                    start = i
                 i += 1
-        
-            if spine_analysis.user_set:
+            i = start
+            while i < l:
+                threshold1s[i] = threshold1s[start]
+                i += 1
+            
+            if settings['find_tip']:
                 
-                if not auto_bg.user_set:
+                if not settings['auto_bg']:
                     
+                    print('Loading background...')
                     background = cv.imread(path + '/' + videoname + '_background.png')
                     background = cv.cvtColor(background, cv.COLOR_BGR2GRAY)
                     
@@ -562,18 +233,18 @@ for filename in videofilenames:
                     background_frame = 0
                     center_x0 = (leftmosts[0] + rightmosts[0]) / 2
                     center_y0 = (topmosts[0] + bottommosts[0]) / 2
-                    thickness0 = max(rightmosts[0] - leftmosts[0], bottommosts[0] - topmosts[0]) * fish_cover_size.user_set / 2
+                    thickness0 = max(rightmosts[0] - leftmosts[0], bottommosts[0] - topmosts[0]) * settings['fish_cover_size'] / 2
                     half_x0 = (rightmosts[0] - leftmosts[0]) / 2 + thickness0
                     half_y0 = (bottommosts[0] - topmosts[0]) / 2 + thickness0
                     left_boundary0 = round(center_x0 - half_x0)
                     right_boundary0 = round(center_x0 + half_x0)
                     top_boundary0 = round(center_y0 - half_y0)
                     bottom_boundary0 = round(center_y0 + half_y0)
-                    i = t_sampling
+                    i = round(t_sampling)
                     while i < l:
                         center_x = (leftmosts[i] + rightmosts[i]) / 2
                         center_y = (topmosts[i] + bottommosts[i]) / 2
-                        thickness = max(rightmosts[i] - leftmosts[i], bottommosts[i] - topmosts[i]) * fish_cover_size.user_set / 2
+                        thickness = max(rightmosts[i] - leftmosts[i], bottommosts[i] - topmosts[i]) * settings['fish_cover_size'] / 2
                         half_x = (rightmosts[i] - leftmosts[i]) / 2 + thickness
                         half_y = (bottommosts[i] - topmosts[i]) / 2 + thickness
                         left_boundary = round(center_x - half_x)
@@ -586,34 +257,34 @@ for filename in videofilenames:
                             background_frame = i
                             break
                         else:
-                            i += t_sampling
+                            i = round(i + t_sampling)
                     
-                    video.set(cv.CAP_PROP_POS_FRAMES, video_start.current)
+                    video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'])
                     ret, frame0 = video.read()
                     frame0 = cv.cvtColor(frame0, cv.COLOR_BGR2GRAY)
-                    frame0 = frame_rotate(frame0, x_original, y_original, rotate.current, rm)
-                    if crop_x.current != 0 and crop_y.current != 0:
-                        frame0 = frame0[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
+                    frame0 = frame_rotate(frame0, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
+                    if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
+                        frame0 = frame0[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
                     background = frame0
-                    video.set(cv.CAP_PROP_POS_FRAMES, video_start.current + background_frame)
+                    video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'] + background_frame)
                     ret, framei = video.read()
                     framei = cv.cvtColor(framei, cv.COLOR_BGR2GRAY)
-                    framei = frame_rotate(framei, x_original, y_original, rotate.current, rm)
-                    if crop_x.current != 0 and crop_y.current != 0:
-                        framei = framei[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
+                    framei = frame_rotate(framei, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
+                    if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
+                        framei = framei[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
                     for ii in range(top_boundary0, bottom_boundary0 + 1):
                         for jj in range(left_boundary0, right_boundary0 + 1):
                             background[ii][jj] = framei[ii][jj]
-                    print('Background created with frames ' + str(video_start.current) + ' and ' + str(video_start.current + background_frame))
+                    print('Background created with frames ' + str(metadata['video_start']) + ' and ' + str(metadata['video_start'] + background_frame))
                     cv.imwrite(path + '/' + videoname + '_0.png', frame0)
                     cv.imwrite(path + '/' + videoname + '_i.png', framei)
                     cv.imwrite(path + '/' + videoname + '_background.png', background)
                     print(videoname + '_background.png' + ' saved.')
                 
                 i = 0
-                j = video_start.current
+                j = metadata['video_start']
                 
-                while j < video_end.current:
+                while j < metadata['video_end']:
                     
                     video.set(cv.CAP_PROP_POS_FRAMES, j)
                     ret, frame = video.read()
@@ -621,47 +292,54 @@ for filename in videofilenames:
                     if ret:
                         
                         frame_t = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                        frame_t = frame_rotate(frame_t, x_original, y_original, rotate.current, rm)
-                        if crop_x.current != 0 and crop_y.current != 0:
-                            frame_t = frame_t[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
+                        frame_t = frame_rotate(frame_t, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
+                        if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
+                            frame_t = frame_t[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
                         
                         frame_d = 255 - cv.absdiff(frame_t, background)
                         blurred_frame = frame_d
-                        if ksize.user_set >= 0:
-                            blurred_frame = cv.GaussianBlur(frame_d, (ksize.user_set, ksize.user_set), 0)
-                        threshold2s[i] = max_entropy_threshold(blurred_frame, threshold2_reduction.user_set)
+                        if settings['ksize'] >= 0:
+                            blurred_frame = cv.GaussianBlur(frame_d, (settings['ksize'], settings['ksize']), 0)
+                        threshold2s[i] = max_entropy_threshold(blurred_frame, settings['threshold2_reduction'])
                         
                     else:
                     
                         break
             
-                    print('\rt2_sampling progress: ', i, '/', l, end = '')
-                    j += t_sampling
-                    i += t_sampling
+                    print('\rt2_sampling progress: ', i, '/', l, end='')
+                    j = round(j + t_sampling)
+                    i = round(i + t_sampling)
                 
                 print()
             
-                i = t_sampling
+                i = 1
+                start = 0
                 while i < l:
-                    start = i - t_sampling
-                    j = start + 1
-                    while j < i:
-                        threshold2s[j] = round((threshold2s[start] * (i - j) + threshold2s[i] * (j - start)) / t_sampling)
-                        j += 1
-                    i += t_sampling
-                i = l - t_sampling
+                    if threshold2s[i] != 0:
+                        j = start + 1
+                        while j < i:
+                            threshold2s[j] = round((threshold2s[start] * (i - j) + threshold2s[i] * (j - start)) / (i - start))
+                            j += 1
+                        start = i
+                    i += 1
+                i = start
                 while i < l:
-                    threshold2s[i] = threshold2s[l - t_sampling]
+                    threshold2s[i] = threshold2s[start]
                     i += 1
         
-        if save_binaryvideo.user_set != '0':
-            c = save_binaryvideo.user_set
-            binary1 = cv.VideoWriter(path + '/' + videoname + '_t1.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
-            if spine_analysis.user_set:
-                binary2 = cv.VideoWriter(path + '/' + videoname + '_t2.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
-        if save_annotatedvideo.user_set != '0':
-            c = save_annotatedvideo.user_set
-            annotated = cv.VideoWriter(path + '/' + videoname + '_a.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current))
+    except Exception:
+        print_exc()
+        
+    try:
+    
+        if settings['save_binaryvideo']:
+            c = settings['save_binaryvideo']
+            binary1 = cv.VideoWriter(path + '/' + videoname + '_t1.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']), 0)
+            if settings['find_tip']:
+                binary2 = cv.VideoWriter(path + '/' + videoname + '_t2.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']), 0)
+        if settings['save_annotatedvideo']:
+            c = settings['save_annotatedvideo']
+            annotated = cv.VideoWriter(path + '/' + videoname + '_a.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']))
             
         i = 0
         cen = [() for i in range(l)]
@@ -673,96 +351,103 @@ for filename in videofilenames:
         directions = [0 for i in range(l)]
         turns = [0 for i in range(l)]
         fish_lengths = [0 for i in range(l)]
-        high_turn_frames = []
-        tail_missing_frames = []
+        errors = {
+            'fish_not_found': [],
+            'tail_not_found': [],
+            'high_turn': []
+            }
         
-        video.set(cv.CAP_PROP_POS_FRAMES, video_start.current)
+        video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'])
         i = 0
-        j = video_start.current
+        j = metadata['video_start']
         
-        while j < video_end.current:
+        while j < metadata['video_end']:
             
             ret, frame = video.read()
             
             if ret:
             
                 frame_t = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                frame_t = frame_rotate(frame_t, x_original, y_original, rotate.current, rm)
-                if crop_x.current != 0 and crop_y.current != 0:
-                    frame_t = frame_t[crop_tly.current:crop_bry, crop_tlx.current:crop_brx]
+                frame_t = frame_rotate(frame_t, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
+                if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
+                    frame_t = frame_t[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
                 
-                if save_annotatedvideo.user_set:
+                if settings['save_annotatedvideo']:
                     aframe = cv.cvtColor(frame_t, cv.COLOR_GRAY2BGR)
                 
                 blurred_frame = frame_t
-                if ksize.user_set >= 0:
-                    blurred_frame = cv.GaussianBlur(frame_t, (ksize.user_set, ksize.user_set), 0)
+                if settings['ksize'] >= 0:
+                    blurred_frame = cv.GaussianBlur(frame_t, (settings['ksize'], settings['ksize']), 0)
                 ret, t1frame = cv.threshold(blurred_frame, threshold1s[i], 255, cv.THRESH_BINARY_INV)
                 
                 contours1, hierarchy1 = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
                 contours1_number = len(contours1)
-                max_perimeter1 = 0
+                if contours1_number == 0:
+                    errors['fish_not_found'].append(i)
+                    continue
+                fish_perimeter1 = 0
                 for ii in range(contours1_number):
                     contour1_len = len(contours1[ii])
-                    if contour1_len > max_perimeter1:
-                        max_perimeter1 = contour1_len
+                    if contour1_len > fish_perimeter1:
+                        fish_perimeter1 = contour1_len
                         fish_contour1 = contours1[ii]
-                        max_contour1_index = ii
-                fish_perimeters[i] = max_perimeter1
+                        fish_contour1_index = ii
+                fish_perimeters[i] = fish_perimeter1
                 
-                s1frame = np.zeros((y_current, x_current), dtype = np.uint8)
-                cv.drawContours(s1frame, contours1, max_contour1_index, 255, -1)
-                if save_binaryvideo.user_set != '0':
+                s1frame = np.zeros((metadata['y_current'], metadata['x_current']), dtype = np.uint8)
+                cv.drawContours(s1frame, contours1, fish_contour1_index, 255, -1)
+                if settings['save_binaryvideo']:
                     binary1.write(s1frame)
                 
                 moment = cv.moments(fish_contour1)
                 cen[i] = (moment['m10'] / moment['m00'], moment['m01'] / moment['m00'])
                 
-                if spine_analysis.user_set:
+                if settings['spine_analysis']:
                     
-                    sq_length = round(4 + fish_areas[i] // 300)
+                    fish_area = cv.contourArea(fish_contour1)
+                    sq_length = round(4 + fish_area // 300)
                     
-                    contour1_point_areas_t = [0 for ii in range(fish_perimeters[i])]
-                    for ii in range(fish_perimeters[i]):
-                        contour1_point_areas_t[ii] = sq_area(s1frame, (fish_contour1[ii][0][0], fish_contour1[ii][0][1]), sq_length)
-                    tail1_index = contour1_point_areas_t.index(min(contour1_point_areas_t))
+                    contour1_points_areas_t = [0 for ii in range(fish_perimeter1)]
+                    for ii in range(fish_perimeter1):
+                        contour1_points_areas_t[ii] = sq_area(s1frame, (fish_contour1[ii][0][0], fish_contour1[ii][0][1]), sq_length)
+                    tail1_index = contour1_points_areas_t.index(min(contour1_points_areas_t))
                     
-                    contour1_point_areas = [0 for ii in range(fish_perimeters[i])]
-                    fish_contour1_points = [0 for ii in range(fish_perimeters[i])]             
+                    contour1_points_areas = [0 for ii in range(fish_perimeter1)]
+                    fish_contour1_points = [0 for ii in range(fish_perimeter1)]             
                     jj = tail1_index
                     ii = 0
-                    while ii < fish_perimeters[i]:
-                        contour1_point_areas[ii] = contour1_point_areas_t[jj]
+                    while ii < fish_perimeter1:
+                        contour1_points_areas[ii] = contour1_points_areas_t[jj]
                         fish_contour1_points[ii] = (fish_contour1[jj][0][0], fish_contour1[jj][0][1])
                         jj += 1
                         ii += 1
-                        if jj >= fish_perimeters[i]:
-                            jj -= fish_perimeters[i]
+                        if jj >= fish_perimeter1:
+                            jj -= fish_perimeter1
                     
                     min_head_pos = []
-                    head_search = range(fish_perimeters[i] // 4, fish_perimeters[i] * 3 // 4)
-                    head_area_cutoff = round(np.percentile(contour1_point_areas[(fish_perimeters[i] // 4):(fish_perimeters[i] * 3 // 4)], 20))
+                    head_search = range(fish_perimeter1 // 4, fish_perimeter1 * 3 // 4)
+                    head_area_cutoff = round(np.percentile(contour1_points_areas[(fish_perimeter1 // 4):(fish_perimeter1 * 3 // 4)], 20))
                     for ii in head_search:
-                        if contour1_point_areas[ii] < head_area_cutoff:
+                        if contour1_points_areas[ii] < head_area_cutoff:
                             min_head_pos.append(ii)
                     head_index = round(np.percentile(min_head_pos, 50))
                     heads[i] = fish_contour1_points[head_index]
                     
                     spine[i][0] = fish_contour1_points[0]
-                    if head_index < fish_perimeters[i] - head_index:
-                        spine_len[i] = round(head_index / contour_points_dist.user_set)
+                    if head_index < fish_perimeter1 - head_index:
+                        spine_len[i] = round(head_index / settings['contour_points_dist'])
                         smaller_arc = head_index - 1
-                        larger_arc = fish_perimeters[i] - head_index - 1
+                        larger_arc = fish_perimeter1 - head_index - 1
                         for ii in range(1, spine_len[i]):
                             current_point = fish_contour1_points[round(smaller_arc * ii / spine_len[i])]
-                            cor_point = fish_contour1_points[fish_perimeters[i] - round(larger_arc * ii / spine_len[i])]
+                            cor_point = fish_contour1_points[fish_perimeter1 - round(larger_arc * ii / spine_len[i])]
                             spine[i].append(((current_point[0] + cor_point[0]) / 2, (current_point[1] + cor_point[1]) / 2))
                     else:
-                        spine_len[i] = round((fish_perimeters[i] - head_index) / contour_points_dist.user_set)
-                        smaller_arc = fish_perimeters[i] - head_index - 1
+                        spine_len[i] = round((fish_perimeter1 - head_index) / settings['contour_points_dist'])
+                        smaller_arc = fish_perimeter1 - head_index - 1
                         larger_arc = head_index - 1
                         for ii in range(1, spine_len[i]):
-                            current_point = fish_contour1_points[round(fish_perimeters[i] - smaller_arc * ii / spine_len[i])]
+                            current_point = fish_contour1_points[round(fish_perimeter1 - smaller_arc * ii / spine_len[i])]
                             cor_point = fish_contour1_points[round(larger_arc * ii / spine_len[i])]
                             spine[i].append(((current_point[0] + cor_point[0]) / 2, (current_point[1] + cor_point[1]) / 2))
                     
@@ -772,60 +457,75 @@ for filename in videofilenames:
                     fish_lengths[i] += pyth(spine[i][spine_len[i] - 1], heads[i])
                     
                     if i > 0:
-                        turns[i] = cal_direction_change(directions[i - 1], directions[i]) * fps
-                        if turns[i] > turn_max.current:
-                            high_turn_frames.append(i)
+                        turns[i] = cal_direction_change(directions[i - 1], directions[i]) * metadata['fps']
+                        if turns[i] > settings['turn_max']:
+                            errors['high_turn'].append(i)
                     
-                    frame_d = 255 - cv.absdiff(frame_t, background)
-                    blurred_frame = frame_d
-                    if ksize.user_set >= 0:
-                        blurred_frame = cv.GaussianBlur(frame_d, (ksize.user_set, ksize.user_set), 0)
-                    ret, t2frame = cv.threshold(blurred_frame, threshold2s[i], 255, cv.THRESH_BINARY_INV)
-                    if save_binaryvideo.user_set != '0':
-                        binary2.write(t2frame)
-                    
-                    tail1_direction = cal_direction(spine[i][0], spine[i][1])
-                    contours2, hierarchy2 = cv.findContours(t2frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
-                    
-                    max_perimeter2 = 0
-                    for contour in contours2:
-                        if len(contour) > max_perimeter2:
-                            max_perimeter2 = len(contour)
-                            fish_contour2 = contour
-                    
-                    tail2_point = ()
-                    min_tail2_area = 99999999
-                    for ii in range(max_perimeter2):
-                        fish_contour2_point = (fish_contour2[ii][0][0], fish_contour2[ii][0][1])
-                        dist_from_tail1 = pyth(fish_contour2_point, spine[i][0])
-                        if dist_from_tail1 > fish_lengths[i] / 3:
-                            continue
-                        direction_to_tail1 = cal_direction(fish_contour2_point, spine[i][0])
-                        bend_from_tail1 = abs(cal_direction_change(tail1_direction, direction_to_tail1))
-                        if bend_from_tail1 > tail2_range.current:
-                            continue
-                        current_area = sq_area(t2frame, fish_contour2_point, sq_length)
-                        if current_area < min_tail2_area:
-                            min_tail2_area = current_area
-                            tail2_point = fish_contour2_point
-                    if tail2_point != ():
-                        tails[i] = tail2_point
-                    else:
-                        tails[i] = spine[i][0]
-                        tail_missing_frames.append(i)
+                    if settings['find_tip']:
+                        
+                        frame_d = 255 - cv.absdiff(frame_t, background)
+                        blurred_frame = frame_d
+                        if settings['ksize'] >= 0:
+                            blurred_frame = cv.GaussianBlur(frame_d, (settings['ksize'], settings['ksize']), 0)
+                        ret, t2frame = cv.threshold(blurred_frame, threshold2s[i], 255, cv.THRESH_BINARY_INV)
+                        
+                        contours2, hierarchy2 = cv.findContours(t2frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
+                        contours2_number = len(contours2)
+                        
+                        if contours2_number == 0:
+                            
+                            errors['tail_not_found'].append(i)
+                            tails[i] = spine[i][0]
+                        
+                        else:
+                            
+                            midpt = spine[i][spine_len[i] // 2]
+                            fish_contour2 = contours2[0]
+                            fish_contour2_index = 0
+                            fish_perimeter2 = len(fish_contour2)
+                            for ii in range(contours2_number):
+                                if cv.pointPolygonTest(contours2[ii], midpt, False) > 0:
+                                    fish_contour2 = contours2[ii]
+                                    fish_contour2_index = ii
+                                    fish_perimeter2 = len(fish_contour2)
+                                    break
+                            
+                            s2frame = np.zeros((metadata['y_current'], metadata['x_current']), dtype = np.uint8)
+                            cv.drawContours(s2frame, contours2, fish_contour2_index, 255, -1)
+                            if settings['save_binaryvideo']:
+                                binary2.write(s2frame)
+                            
+                            direction_tail1_to_midpt = cal_direction(spine[i][0], midpt)
+                            fish_contour2_copy = deepcopy(fish_contour2)
+                            fish_contour2 = []
+                            for ii in range(fish_perimeter2):
+                                tail2 = [fish_contour2_copy[ii][0][0], fish_contour2_copy[ii][0][1]]
+                                direction_tail2_to_midpt = cal_direction(tail2, midpt)
+                                deviation = cal_direction_change(direction_tail1_to_midpt, direction_tail2_to_midpt)
+                                if deviation < settings['tail2_range']:
+                                    fish_contour2.append(tail2)
+                            tail2_number = len(fish_contour2)
+                            
+                            tail2_area = 0
+                            for ii in range(tail2_number):
+                                point_area = sq_area(s2frame, fish_contour2[ii], sq_length)
+                                if point_area > tail2_area:
+                                    tail2_area = point_area
+                                    tail2 = fish_contour2[ii]
+                            tails[i] = tail2
                 
-                if save_annotatedvideo.user_set != '0':
+                if settings['save_annotatedvideo']:
                     cv.circle(aframe, (int(cen[i][0]), int(cen[i][1])), 3, (0, 255, 255), -1)
-                    if spine_analysis:
-                        for ii in range(fish_perimeters[i]):
-                            colorn = int(ii / fish_perimeters[i] * 255)
+                    if settings['spine_analysis']:
+                        for ii in range(fish_perimeter1):
+                            colorn = int(ii / fish_perimeter1 * 255)
                             cv.circle(aframe, fish_contour1_points[ii], 1, (0, colorn, 255 - colorn), -1)
                         for ii in range(spine_len[i]):
                             colorn = int(ii / spine_len[i] * 255)
                             cv.circle(aframe, (round(spine[i][ii][0]), round(spine[i][ii][1])), 2, (colorn, 255 - colorn // 2, 255 - colorn), -1)
                         heads[i] = fish_contour1_points[head_index]
                         cv.circle(aframe, (round(heads[i][0]), round(heads[i][1])), 3, (255, 0, 127), -1)
-                        if tails[i] != ():
+                        if settings['find_tip']:
                             cv.circle(aframe, (round(tails[i][0]), round(tails[i][1])), 3, (255, 0, 255), -1)
                     annotated.write(aframe)
             
@@ -833,53 +533,44 @@ for filename in videofilenames:
                 
                 break
             
-            print('\rProgress: ', i, '/', l, end = '')
-            j += 1
+            print('\rProgress: ', i, '/', l, end='')
+            j += metadata['downsampling']
             i += 1
         
         print()
         video.release()
-        if save_binaryvideo.user_set != '0':
+        if settings['save_binaryvideo']:
             binary1.release()
-            if spine_analysis.user_set:
+            if settings['find_tip']:
                 binary2.release() 
-        if save_annotatedvideo.user_set != '0':
+        if settings['save_annotatedvideo']:
             annotated.release()
         
-        metadata.update({
-            'downsampling': downsampling.user_set,
-            'k_size': ksize.user_set,
-            't_sampling_time': t_sampling_time.user_set,
-            'threshold1_reduction': threshold1_reduction.user_set,
-            'save_binaryvideo': save_binaryvideo.user_set,
-            'spine_analysis': spine_analysis.user_set,
-            'contour_points_dist': contour_points_dist.user_set,
-            'auto_bg': auto_bg.user_set,
-            'fish_cover_size': fish_cover_size.user_set,
-            'threshold2_reduction': threshold2_reduction.user_set,
-            'tail2_range': tail2_range.current,
-            'turn_max': turn_max.current,
-            'save_annotatedvideo': save_annotatedvideo.user_set,
-            'date': datetime.datetime.now()
-        })
+        metadata.update(settings)
         with open(path + '/' + videoname + '_metadata.csv', 'w') as f:
-            for key in metadata:
+            for key in metadata.keys():
                 f.write(key + ',' + str(metadata[key]) + '\n')
         
         with open(path + '/' + videoname + '_trackdata.csv', 'w', newline='') as f:
-            fieldnames = ['threshold1', 'fish_area', 'fish_perimeter',
-                          'leftmost', 'rightmost', 'topmost', 'bottommost', 'threshold2']
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            for i in range(l):
-                writer.writerow({'threshold1': threshold1s[i],
-                                 'fish_area': fish_areas[i],
-                                 'fish_perimeter': fish_perimeters[i],
-                                 'leftmost': leftmosts[i],
-                                 'rightmost': rightmosts[i],
-                                 'topmost': topmosts[i],
-                                 'bottommost': bottommosts[i],
-                                 'threshold2': threshold2s[i]})
+            if settings['find_tip']:
+                fieldnames = ['threshold1', 'fish_perimeter', 'leftmost', 'rightmost', 'topmost', 'bottommost', 'threshold2']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for i in range(l):
+                    writer.writerow({'threshold1': threshold1s[i],
+                                     'fish_perimeter': fish_perimeters[i],
+                                     'leftmost': leftmosts[i],
+                                     'rightmost': rightmosts[i],
+                                     'topmost': topmosts[i],
+                                     'bottommost': bottommosts[i],
+                                     'threshold2': threshold2s[i]})
+            else:
+                fieldnames = ['threshold1', 'fish_perimeter']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                for i in range(l):
+                    writer.writerow({'threshold1': threshold1s[i],
+                                     'fish_perimeter': fish_perimeters[i]})
         
         with open(path + '/' + videoname + '_cen.csv', 'w') as f:
             header = ['centroidX', 'centroidY']
@@ -892,11 +583,14 @@ for filename in videofilenames:
                     f.write(str(cell) + ',')
                 f.write('\n')
         
-        if spine_analysis:
+        if settings['spine_analysis']:
             
-            with open(path + '/' + videoname + '_warnings.txt', 'w') as f:
-                f.write(str(len(high_turn_frames)) + 'high_turn_frames: ' + str(high_turn_frames) + '\n')
-                f.write(str(len(tail_missing_frames)) + 'tail_missing_frames: ' + str(tail_missing_frames))
+            with open(path + '/' + videoname + '_errors.csv', 'w') as f:
+                for key in errors.keys():
+                    f.write(key + ',')
+                    for item in errors[key]:
+                        f.write(str(item) + ',')
+                    f.write('\n')
             
             with open(path + '/' + videoname + '_spine.csv', 'w') as f:
                 f.write('Number of spine points' + ', ' + 'Spine points(XY, XY, ...)' + '\n')
@@ -909,21 +603,31 @@ for filename in videofilenames:
                         f.write(str(cell) + ',')
                     f.write('\n')
             
-            with open(path + '/' + videoname + '_headtail.csv', 'w') as f:
-                header = ['Head_x', 'Head_y', 'Tail_x', 'Tail_y']
+            with open(path + '/' + videoname + '_heads.csv', 'w') as f:
+                header = ['Head_x', 'Head_y']
                 for word in header:
                     f.write(str(word) + ',')
                 f.write('\n')
                 for i in range(l):
-                    if tails[i] == ():
-                        row = [heads[i][0], heads[i][1]]
-                    else:
-                        row = [heads[i][0], heads[i][1], tails[i][0], tails[i][1]]
+                    row = [heads[i][0], heads[i][1]]
                     for cell in row:
                         f.write(str(cell) + ',')
                     f.write('\n')
             
-            with open(path + '/' + videoname + '_direction.csv', 'w') as f:
+            if settings['find_tip']:
+                with open(path + '/' + videoname + '_tails.csv', 'w') as f:
+                    header = ['Tail_x', 'Tail_y']
+                    for word in header:
+                        f.write(str(word) + ',')
+                    f.write('\n')
+                    for i in range(l):
+                        if tails[i] != ():
+                            row = [tails[i][0], tails[i][1]]
+                            for cell in row:
+                                f.write(str(cell) + ',')
+                        f.write('\n')
+            
+            with open(path + '/' + videoname + '_directions.csv', 'w') as f:
                 header = ['Direction', 'Turn']
                 for word in header:
                     f.write(str(word) + ',')
@@ -934,7 +638,7 @@ for filename in videofilenames:
                         f.write(str(cell) + ',')
                     f.write('\n')
             
-            with open(path + '/' + videoname + '_fishlength.csv', 'w') as f:
+            with open(path + '/' + videoname + '_fishlengths.csv', 'w') as f:
                 for i in range(l):
                     f.write(str(fish_lengths[i]) + ', \n')
                 
@@ -943,4 +647,4 @@ for filename in videofilenames:
     except Exception:
         
         print('An error occurred when processing ' + videoname + ':')
-        traceback.print_exc()
+        print_exc()
