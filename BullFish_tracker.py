@@ -5,9 +5,10 @@ import cv2 as cv
 import numpy as np
 from copy import deepcopy
 from traceback import print_exc
+from statistics import median
 from BullFish_pkg.general import csvtodict, load_settings
 from BullFish_pkg.math import pyth, cal_direction, cal_direction_change
-from BullFish_pkg.cv_editing import get_rm, frame_rotate
+from BullFish_pkg.cv_editing import get_rm, frame_grc, frame_blur
 
 default_settings = {
     "ksize": 5,
@@ -23,7 +24,7 @@ default_settings = {
     "auto_bg": 1,
     "fish_cover_size": 1.5,
     "threshold2_reduction": 0,
-    "tail2_range": 45
+    "tail2_range": 0.7
 }
 
 print('Welcome to BullFish_tracker.')
@@ -74,7 +75,7 @@ def max_entropy_threshold(image, threshold_reduction):
     return round(tmax * (1 - threshold_reduction / 100))
 
 def sq_area(image, point, r):
-    return sum(sum((1 if image[j][i] else 0) for i in range(point[0] - r, point[0] + r + 1)) for j in range(point[1] - r, point[1] + r + 1))
+    return sum([sum([(1 if image[j][i] else 0) for i in range(point[0] - r, point[0] + r + 1)]) for j in range(point[1] - r, point[1] + r + 1)])
 
 for file in os.listdir('.'):
         
@@ -109,8 +110,6 @@ for file in os.listdir('.'):
     try:
         
         rm = get_rm(metadata['x_original'], metadata['y_original'], metadata['rotate'])
-        crop_brx = metadata['crop_tlx'] + metadata['crop_x']
-        crop_bry = metadata['crop_tly'] + metadata['crop_y']
         
         l = (metadata['video_end'] - metadata['video_start']) // metadata['downsampling']
         j = metadata['video_start']
@@ -124,6 +123,7 @@ for file in os.listdir('.'):
             rightmosts = [0 for i in range(l)]
             topmosts = [0 for i in range(l)]
             bottommosts = [0 for i in range(l)]
+            fish_perimeter2s = [] # impression of fish perimeter in t2
         
         create_trackdata = True
         if os.path.exists(path + '/' + videoname + '_trackdata.csv'):
@@ -163,17 +163,11 @@ for file in os.listdir('.'):
                 
                 if ret:
                     
-                    frame_t = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                    frame_t = frame_rotate(frame_t, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
-                    if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
-                        frame_t = frame_t[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
+                    frame_t = frame_grc(frame, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
+                    frame_b = frame_blur(frame_t, settings['ksize'])
                     
-                    blurred_frame = deepcopy(frame_t)
-                    if settings['ksize'] >= 0:
-                        blurred_frame = cv.GaussianBlur(frame_t, (settings['ksize'], settings['ksize']), 0)
-                    
-                    threshold1s[i] = max_entropy_threshold(blurred_frame, settings['threshold1_reduction'])
-                    ret, t1frame = cv.threshold(blurred_frame, threshold1s[i], 255, cv.THRESH_BINARY_INV)
+                    threshold1s[i] = max_entropy_threshold(frame_b, settings['threshold1_reduction'])
+                    ret, t1frame = cv.threshold(frame_b, threshold1s[i], 255, cv.THRESH_BINARY_INV)
                     
                     if settings['find_tip']:
                         contours, hierarchy = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
@@ -183,7 +177,6 @@ for file in os.listdir('.'):
                             contour_len = len(contours[ii])
                             if contour_len > max_perimeter:
                                 max_perimeter = contour_len
-                                max_contour_index = ii
                                 fish_contour = contours[ii]
                         leftmost = tuple(fish_contour[fish_contour[:,:,0].argmin()][0])
                         rightmost = tuple(fish_contour[fish_contour[:,:,0].argmax()][0])
@@ -261,17 +254,12 @@ for file in os.listdir('.'):
                     
                     video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'])
                     ret, frame0 = video.read()
-                    frame0 = cv.cvtColor(frame0, cv.COLOR_BGR2GRAY)
-                    frame0 = frame_rotate(frame0, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
-                    if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
-                        frame0 = frame0[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
-                    background = frame0
+                    background = frame_grc(frame0, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
+                    
                     video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'] + background_frame)
                     ret, framei = video.read()
-                    framei = cv.cvtColor(framei, cv.COLOR_BGR2GRAY)
-                    framei = frame_rotate(framei, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
-                    if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
-                        framei = framei[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
+                    framei = frame_grc(framei, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
+                    
                     for ii in range(top_boundary0, bottom_boundary0 + 1):
                         for jj in range(left_boundary0, right_boundary0 + 1):
                             background[ii][jj] = framei[ii][jj]
@@ -291,16 +279,14 @@ for file in os.listdir('.'):
                     
                     if ret:
                         
-                        frame_t = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                        frame_t = frame_rotate(frame_t, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
-                        if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
-                            frame_t = frame_t[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
-                        
+                        frame_t = frame_grc(frame, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
                         frame_d = 255 - cv.absdiff(frame_t, background)
-                        blurred_frame = frame_d
-                        if settings['ksize'] >= 0:
-                            blurred_frame = cv.GaussianBlur(frame_d, (settings['ksize'], settings['ksize']), 0)
-                        threshold2s[i] = max_entropy_threshold(blurred_frame, settings['threshold2_reduction'])
+                        frame_db = frame_blur(frame_d, settings['ksize'])
+                        threshold2s[i] = max_entropy_threshold(frame_db, settings['threshold2_reduction'])
+                        
+                        ret, t2frame = cv.threshold(frame_db, threshold2s[i], 255, cv.THRESH_BINARY_INV)
+                        contours, hierarchy = cv.findContours(t2frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
+                        fish_perimeter2s.append(max([len(contour) for contour in contours]))
                         
                     else:
                     
@@ -367,18 +353,13 @@ for file in os.listdir('.'):
             
             if ret:
             
-                frame_t = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
-                frame_t = frame_rotate(frame_t, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm)
-                if metadata['crop_x'] != 0 and metadata['crop_y'] != 0:
-                    frame_t = frame_t[metadata['crop_tly']:crop_bry, metadata['crop_tlx']:crop_brx]
+                frame_t = frame_grc(frame, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
                 
                 if settings['save_annotatedvideo']:
                     aframe = cv.cvtColor(frame_t, cv.COLOR_GRAY2BGR)
                 
-                blurred_frame = frame_t
-                if settings['ksize'] >= 0:
-                    blurred_frame = cv.GaussianBlur(frame_t, (settings['ksize'], settings['ksize']), 0)
-                ret, t1frame = cv.threshold(blurred_frame, threshold1s[i], 255, cv.THRESH_BINARY_INV)
+                frame_b = frame_blur(frame_t, settings['ksize'])
+                ret, t1frame = cv.threshold(frame_b, threshold1s[i], 255, cv.THRESH_BINARY_INV)
                 
                 contours1, hierarchy1 = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
                 contours1_number = len(contours1)
@@ -463,56 +444,65 @@ for file in os.listdir('.'):
                     
                     if settings['find_tip']:
                         
+                        midpt = spine[i][spine_len[i] // 2]
+                        fish_perimeter2_est = median(fish_perimeter2s)
                         frame_d = 255 - cv.absdiff(frame_t, background)
-                        blurred_frame = frame_d
-                        if settings['ksize'] >= 0:
-                            blurred_frame = cv.GaussianBlur(frame_d, (settings['ksize'], settings['ksize']), 0)
-                        ret, t2frame = cv.threshold(blurred_frame, threshold2s[i], 255, cv.THRESH_BINARY_INV)
+                        frame_db = frame_blur(frame_d, settings['ksize'])
                         
-                        contours2, hierarchy2 = cv.findContours(t2frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
-                        contours2_number = len(contours2)
+                        for jj in range(threshold2s[i], 0, -1):
+                            
+                            ret, t2frame = cv.threshold(frame_db, jj, 255, cv.THRESH_BINARY_INV)
+                            
+                            contours2, hierarchy2 = cv.findContours(t2frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
+                            contours2_number = len(contours2)
                         
-                        if contours2_number == 0:
-                            
-                            errors['tail_not_found'].append(i)
-                            tails[i] = spine[i][0]
+                            if contours2_number == 0:
+                                
+                                errors['tail_not_found'].append(i)
+                                tails[i] = spine[i][0]
+                                break
                         
-                        else:
+                            else:
+                                
+                                fish_contour2 = contours2[0]
+                                fish_contour2_index = 0
+                                fish_perimeter2 = len(fish_contour2)
+                                for ii in range(contours2_number):
+                                    if cv.pointPolygonTest(contours2[ii], midpt, False) > 0:
+                                        fish_contour2 = contours2[ii]
+                                        fish_contour2_index = ii
+                                        fish_perimeter2 = len(fish_contour2)
+                                        break
+                                
+                                if fish_perimeter2 > fish_perimeter2_est * 3:
+                                    continue
+                                
+                                s2frame = np.zeros((metadata['y_current'], metadata['x_current']), dtype = np.uint8)
+                                cv.drawContours(s2frame, contours2, fish_contour2_index, 255, -1)
+                                if settings['save_binaryvideo']:
+                                    binary2.write(s2frame)
                             
-                            midpt = spine[i][spine_len[i] // 2]
-                            fish_contour2 = contours2[0]
-                            fish_contour2_index = 0
-                            fish_perimeter2 = len(fish_contour2)
-                            for ii in range(contours2_number):
-                                if cv.pointPolygonTest(contours2[ii], midpt, False) > 0:
-                                    fish_contour2 = contours2[ii]
-                                    fish_contour2_index = ii
-                                    fish_perimeter2 = len(fish_contour2)
-                                    break
-                            
-                            s2frame = np.zeros((metadata['y_current'], metadata['x_current']), dtype = np.uint8)
-                            cv.drawContours(s2frame, contours2, fish_contour2_index, 255, -1)
-                            if settings['save_binaryvideo']:
-                                binary2.write(s2frame)
-                            
-                            direction_tail1_to_midpt = cal_direction(spine[i][0], midpt)
-                            fish_contour2_copy = deepcopy(fish_contour2)
-                            fish_contour2 = []
-                            for ii in range(fish_perimeter2):
-                                tail2 = [fish_contour2_copy[ii][0][0], fish_contour2_copy[ii][0][1]]
-                                direction_tail2_to_midpt = cal_direction(tail2, midpt)
-                                deviation = cal_direction_change(direction_tail1_to_midpt, direction_tail2_to_midpt)
-                                if deviation < settings['tail2_range']:
-                                    fish_contour2.append(tail2)
-                            tail2_number = len(fish_contour2)
-                            
-                            tail2_area = 0
-                            for ii in range(tail2_number):
-                                point_area = sq_area(s2frame, fish_contour2[ii], sq_length)
-                                if point_area > tail2_area:
-                                    tail2_area = point_area
-                                    tail2 = fish_contour2[ii]
-                            tails[i] = tail2
+                                direction_tail1_to_midpt = cal_direction(spine[i][0], midpt)
+                                fish_contour2_copy = deepcopy(fish_contour2)
+                                fish_contour2 = []
+                                for ii in range(fish_perimeter2):
+                                    tail2 = [fish_contour2_copy[ii][0][0], fish_contour2_copy[ii][0][1]]
+                                    direction_tail2_to_midpt = cal_direction(tail2, midpt)
+                                    deviation = cal_direction_change(direction_tail1_to_midpt, direction_tail2_to_midpt)
+                                    if deviation < settings['tail2_range']:
+                                        fish_contour2.append(tail2)
+                                tail2_number = len(fish_contour2)
+                                
+                                tail2_area = 9999999
+                                for ii in range(tail2_number):
+                                    point_area = sq_area(s2frame, fish_contour2[ii], sq_length)
+                                    if point_area < tail2_area:
+                                        tail2_area = point_area
+                                        tail2 = fish_contour2[ii]
+                                tails[i] = tail2
+                                
+                                threshold2s[i] = jj
+                                break
                 
                 if settings['save_annotatedvideo']:
                     cv.circle(aframe, (int(cen[i][0]), int(cen[i][1])), 3, (0, 255, 255), -1)
