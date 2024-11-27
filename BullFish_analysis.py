@@ -2,78 +2,45 @@ import os
 import csv
 import matplotlib.pyplot as plt
 import math
-from sys import exit
 from scipy.signal import find_peaks
 from copy import copy
-from decimal import Decimal
 from statistics import median
-pi = Decimal(math.pi)
+from BullFish_pkg.math import pyth, cal_direction, cal_direction_change
+from BullFish_pkg.general import csvtodict, load_settings
+from BullFish_pkg.data import errors_correct, cal_preference
 
-if not os.path.exists('bullfish_analysis_settings.csv'):
-    with open('bullfish_analysis_settings.csv', 'w') as f:
-        headers = ['tank_x', 'tank_y', 'plot_figure', 'sampling', 'accel_cutoff',
-                   'min_accel_dur', 'min_max_accel', 'min_speed_change', 'spine_analysis',
-                   'turn_cutoff', 'min_turn_dur', 'min_max_turn_velocity',
-                   'min_turn_angle', 'bend_cutoff', 'min_bend_dur', 'min_bend_speed',
-                   'min_bend_angle', 'amplitude_cutoff', 'min_amplitude_dur',
-                   'min_amplitude_dt', 'min_amplitude', 'correlation_portion']
-        for word in headers:
-            f.write(word + '\n')
-    print('Set settings first')
-    exit()
-else:
-    with open('bullfish_analysis_settings.csv', 'r') as f:
-        settings = {row[0]: row[1] for row in csv.reader(f)}
-    tank_x = Decimal(settings['tank_x'])
-    tank_y = Decimal(settings['tank_y'])
-    plot_figure = bool(int(settings['plot_figure']))
-    sampling = int(settings['sampling'])
-    accel_cutoff = Decimal(settings['accel_cutoff'])
-    min_accel_dur = Decimal(settings['min_accel_dur'])
-    min_max_accel = Decimal(settings['min_max_accel'])
-    min_speed_change = Decimal(settings['min_speed_change'])
-    spine_analysis = bool(int(settings['spine_analysis']))
-    if spine_analysis:
-        turn_cutoff = Decimal(settings['turn_cutoff']) * pi / 180
-        min_turn_dur = Decimal(settings['min_turn_dur'])
-        min_max_turn_velocity = Decimal(settings['min_max_turn_velocity']) * pi / 180
-        min_turn_angle = Decimal(settings['min_turn_angle']) * pi / 180
-        bend_cutoff = Decimal(settings['bend_cutoff']) * pi / 180
-        min_bend_dur = Decimal(settings['min_bend_dur'])
-        min_bend_speed = Decimal(settings['min_bend_speed']) * pi / 180
-        min_bend_angle = Decimal(settings['min_bend_angle']) * pi / 180
-        amplitude_cutoff = Decimal(settings['amplitude_cutoff'])
-        min_amplitude_dur = Decimal(settings['min_amplitude_dur'])
-        min_amplitude_dt = Decimal(settings['min_amplitude_dt'])
-        min_amplitude = Decimal(settings['min_amplitude'])
-        correlation_portion = int(settings['correlation_portion'])
+default_settings = {
+    "tank_x": 210,
+    "tank_y": 144,
+    "plot_figure": 0,
+    "export": 0,
+    "sampling": 2,
+    "speed_limit": 2000,
+    "accel_cutoff": 100,
+    "min_accel_dur": 0.02,
+    "min_max_accel": 0,
+    "min_speed_change": 10,
+    "spine_analysis": 1,
+    "turn_cutoff": 2,
+    "min_turn_dur": 0.02,
+    "min_max_turn_velocity": 0,
+    "min_turn_angle": 0.087,
+    "bend_cutoff": 2,
+    "min_bend_dur": 0.02,
+    "min_bend_speed": 0,
+    "min_bend_angle": 0.035,
+    "amplitude_cutoff": 50,
+    "min_amplitude_dur": 0.02,
+    "min_amplitude_dt": 0,
+    "min_amplitude": 2,
+    "correlation_portion": 3,
+    'find_tip': 1
+}
 
-def pyth(point1, point2):
-    return Decimal.sqrt((point1[0] - point2[0]) ** 2 + (point1[1] - point2[1]) ** 2)
-
-def cal_direction(point1, point2): #from point1 to point2
-    if point1[0] == point2[0] and point1[1] == point2[1]:
-        return Decimal(0)
-    else:
-        return Decimal(math.atan2(point2[1] - point1[1], point2[0] - point1[0]))
-
-def cal_direction_change(s1, s2): #from s1 to s2
-    direction_change = Decimal(s2) - Decimal(s1)
-    if direction_change > pi:
-        return direction_change - pi * 2
-    elif direction_change <= -pi:
-        return direction_change + pi * 2
-    else:
-        return direction_change
+settings = load_settings('analysis', default_settings)
 
 def per_min(count):
-    return Decimal(count) * 60 / total_time
-
-def cal_preference(p, n):
-    try:
-        return (p - n) / (p + n)
-    except:
-        return 0
+    return count * 60 / total_time
 
 class list_set:
     
@@ -151,7 +118,7 @@ def get_peaks(list1, list2, prominence, criteria_f, criteria_b, criteria_peak):
             upheight = height - list2[startpos]
             change = list2[endpos] - list2[startpos]
             auc = sum(list2[j] for j in range(startpos, endpos + 1))
-            meanslope = upheight / Decimal(length) if length > 0 else 0
+            meanslope = upheight / length if length > 0 else 0
             maxslope = 0
             maxslopepos = 0
             for j in range(startpos + 1, peakpos + 1):
@@ -166,7 +133,7 @@ def get_peaks(list1, list2, prominence, criteria_f, criteria_b, criteria_peak):
         else:
             height = list2[endpos]
             change = height - list2[startpos]
-            meanslope = change / Decimal(length) if length > 0 else 0
+            meanslope = change / length if length > 0 else 0
             maxslope = 0
             maxslopepos = 0
             for j in range(startpos + 1, endpos + 1):
@@ -245,7 +212,7 @@ def find_steps(data, dists, speeds, dist1s):
         steps[i].kinematics['speed_change'] = step_max_speed - speeds[startpos]
         step_max_accel = 0
         for j in range(startpos + 1, step_max_speed_pos):
-            step_accel = (speeds[j] - speeds[j - 1]) * fps
+            step_accel = (speeds[j] - speeds[j - 1]) * metadata['fps']
             if step_accel > step_max_accel:
                 step_max_accel = step_accel
         steps[i].kinematics['max_accel'] = step_max_accel
@@ -262,7 +229,7 @@ def steps_calculate(steps, kind_criterion):
         values = [step.properties[key] for step in selected_steps]
         calculations[key]['count'] = len(values)
         calculations[key]['sum'] = sum(values)
-        calculations[key]['mean'] = calculations[key]['sum'] / Decimal(calculations[key]['count'])
+        calculations[key]['mean'] = calculations[key]['sum'] / calculations[key]['count']
         calculations[key]['max'] = max(values)
     return calculations
 
@@ -277,7 +244,7 @@ def steps_correlate(steps, kind_criterion, sortby, compute, portion):
     for i in range(portion):
         start = round(i * count / portion)
         end = round((i + 1) * count / portion)
-        value = sum([selected_steps[j].choose(compute) for j in range(start, end)]) / Decimal(end - start)
+        value = sum([selected_steps[j].choose(compute) for j in range(start, end)]) / (end - start)
         value_name = 'value_' + str(i)
         correlations.update({value_name: value})
     return correlations
@@ -286,7 +253,7 @@ def search_value(operations, dictionary):
     for operation in operations:
         same = True
         for key in operation.keys():
-            if type(operation[key]) == int or type(operation[key]) == Decimal:
+            if type(operation[key]) == int or type(operation[key]) == float:
                 continue
             if operation[key] != dictionary[key]:
                 same = False
@@ -324,65 +291,64 @@ for file in os.listdir('.'):
     
     # load metadata
     print('\nProcessing ' + filename)
-    with open(path + '/' + videoname + '_metadata.csv', 'r') as f:
-        metadata = {row[0]: row[1] for row in csv.reader(f)}
-        fps = Decimal(metadata['fps'])
-        video_start = int(metadata['video_start'])
-        video_end = int(metadata['video_end'])
-        swimarea_tlx = int(metadata['swimarea_tlx'])
-        swimarea_x = int(metadata['swimarea_x'])
-        swimarea_tly = int(metadata['swimarea_tly'])
-        swimarea_y = int(metadata['swimarea_y'])
-    l = video_end - video_start
-    if swimarea_x > swimarea_y:
-        ratio = tank_x / Decimal(swimarea_x)
+    metadata = csvtodict(path + '/' + videoname + '_metadata.csv')
+    l = metadata['video_end'] - metadata['video_start']
+    if metadata['swimarea_x'] > metadata['swimarea_y']:
+        ratio = settings['tank_x'] / metadata['swimarea_x']
     else:
-        ratio = tank_y / Decimal(swimarea_y)
+        ratio = settings['tank_y'] / metadata['swimarea_y']
     
     # load essential tracking data
-    with open(path + '/' + videoname + '_fishlength.csv', 'r') as f:
+    with open(path + '/' + videoname + '_fishlengths.csv', 'r') as f:
         fish_lengths = [cell for cell in csv.reader(f)]
-    fish_length = median([Decimal(length[0]) for length in fish_lengths])
+    fish_length = median([float(length[0]) for length in fish_lengths])
     
     with open(path + '/' + videoname + '_cen.csv', 'r') as f:
         cen = [[cell for cell in row] for row in csv.reader(f)]
         cen.pop(0)
         for i in range(l):
-            cen[i] = (Decimal(cen[i][0]) * ratio, Decimal(cen[i][1]) * ratio)
+            cen[i] = (float(cen[i][0]) * ratio, float(cen[i][1]) * ratio)
     
     # obtain a list of speed at each frame
     cen_dists = [0 for i in range(l)]
     speeds = [0 for i in range(l)]
-    for i in range(sampling, l, sampling):
-        cen_dists[i] = pyth(cen[i], cen[i - sampling]) / Decimal(sampling)
-        speeds[i] = cen_dists[i] * fps
-    for i in range(0, sampling):
-        cen_dists[i] = cen_dists[sampling]
-    for i in range(sampling * 2, l, sampling):
-        for j in range(i - sampling + 1, i):
-            cen_dists[j] = (cen_dists[i - sampling] * (i - j) + cen_dists[i] * (j - (i - sampling))) / Decimal(sampling)
-            speeds[j] = cen_dists[j] * fps
+    for i in range(settings['sampling'], l, settings['sampling']):
+        cen_dists[i] = pyth(cen[i], cen[i - settings['sampling']]) / settings['sampling']
+        speeds[i] = cen_dists[i] * metadata['fps']
+    for i in range(0, settings['sampling']):
+        cen_dists[i] = cen_dists[settings['sampling']]
+    for i in range(settings['sampling'] * 2, l, settings['sampling']):
+        for j in range(i - settings['sampling'] + 1, i):
+            cen_dists[j] = (cen_dists[i - settings['sampling']] * (i - j) + cen_dists[i] * (j - (i - settings['sampling']))) / settings['sampling']
+            speeds[j] = cen_dists[j] * metadata['fps']
+    
+    error1_frames = []
+    for i in range(l):
+        if speeds[i] > settings['speed_limit']:
+            error1_frames.append(i)
+    cen_dists = errors_correct(cen_dists, error1_frames)
+    speeds = errors_correct(speeds, error1_frames)
     
     # obtain total distance travelled and average speed
     total_distance = sum(cen_dists)
-    total_time = Decimal(l) / fps
+    total_time = l / metadata['fps']
     speed_avg = total_distance / total_time
     
     # determine whether the fish is freezing for each frame
     freeze = [0 for i in range(l)]
-    for i in range(int(fps * 3), l):
-        cdist1 = pyth(cen[int(i - fps * 2)], cen[int(i - fps * 3)])
-        cdist2 = pyth(cen[int(i - fps)], cen[int(i - fps * 2)])
-        cdist3 = pyth(cen[i], cen[int(i - fps)])
+    for i in range(int(metadata['fps'] * 3), l):
+        cdist1 = pyth(cen[int(i - metadata['fps'] * 2)], cen[int(i - metadata['fps'] * 3)])
+        cdist2 = pyth(cen[int(i - metadata['fps'])], cen[int(i - metadata['fps'] * 2)])
+        cdist3 = pyth(cen[i], cen[int(i - metadata['fps'])])
         if cdist1 < 1 and cdist2 < 1 and cdist3 < 1:
-            for j in range(int(i - fps * 3 + 1), i + 1):
+            for j in range(int(i - metadata['fps'] * 3 + 1), i + 1):
                 freeze[j] = 1
         elif cdist1 > 1 and cdist2 > 1 and cdist3 > 1:
-            for j in range(int(i - fps * 2 + 1), i + 1):
+            for j in range(int(i - metadata['fps'] * 2 + 1), i + 1):
                 freeze[j] = 0
     
     # obtain parameters related to freezing
-    total_freeze_time = Decimal(sum(freeze)) / fps
+    total_freeze_time = sum(freeze) / metadata['fps']
     freeze_percent = total_freeze_time / total_time * 100
     active_time = total_time - total_freeze_time
     active_speed = total_distance / active_time
@@ -399,9 +365,9 @@ for file in os.listdir('.'):
     # obtain a list of speed measured over 1s
     cdist1s = [0 for i in range(l)]
     for i in range(1, l):
-        start = max(1, round(i + 1 - fps / 2))
-        end = min(l, round(i + 1 + fps / 2))
-        cdist1s[i] = sum([cen_dists[j] for j in range(start, end)]) * fps / Decimal(end - start)
+        start = max(1, round(i + 1 - metadata['fps'] / 2))
+        end = min(l, round(i + 1 + metadata['fps'] / 2))
+        cdist1s[i] = sum([cen_dists[j] for j in range(start, end)]) * metadata['fps'] / (end - start)
     max_distance_1s = max(cdist1s)
     
     # output basic kinematics to analysis dictionary
@@ -438,11 +404,12 @@ for file in os.listdir('.'):
         else:
             return False
     def accels_criteria_peak(datum):
-        if datum['length'] >= int(min_accel_dur * fps) and datum['maxslope'] * fps >= min_max_accel and datum['change'] >= min_speed_change:
-            return True
-        else:
-            return False
-    accels_data = get_peaks(accels.p_list, speeds.list, accel_cutoff / fps,
+        if datum['length'] >= int(settings['min_accel_dur'] * metadata['fps']):
+            if datum['maxslope'] * metadata['fps'] >= settings['min_max_accel']:
+                if datum['change'] >= settings['min_speed_change']:
+                    return True
+        return False
+    accels_data = get_peaks(accels.p_list, speeds.list, settings['accel_cutoff'] / metadata['fps'],
                             accels_criteria_f, accels_criteria_b, accels_criteria_peak)
     accels_count = len(accels_data)
     
@@ -459,9 +426,9 @@ for file in os.listdir('.'):
     for i in range(accels_count):
         ke[i] = speeds_data[i]['height'] ** 2 - speeds.list[speeds_data[i]['startpos']] ** 2
     '''
-    if plot_figure:
+    if settings['plot_figure']:
         fig, ax = plt.subplots()
-        ax.plot([i * fps for i in accels.p_list])
+        ax.plot([i * metadata['fps'] for i in accels.p_list])
         ax.plot(speeds.list, c='b')
         for datum in accels_data:
             x = [i for i in range(datum['startpos'], datum['endpos'] + 1)]
@@ -473,15 +440,15 @@ for file in os.listdir('.'):
     
     accels_per_min = per_min(accels_count)
     total_speed_change = sum([datum['change'] for datum in accels_data])
-    total_accel_dur = Decimal(sum([datum['length'] for datum in accels_data])) / fps
-    mean_speed_change = total_speed_change / Decimal(accels_count)
-    mean_peak_accel = sum([datum['maxslope'] for datum in accels_data]) * fps / Decimal(accels_count)
-    mean_accel = sum([(datum['meanslope']) for datum in accels_data]) * fps / Decimal(accels_count)
-    mean_accel_dur = total_accel_dur / Decimal(accels_count)
+    total_accel_dur = sum([datum['length'] for datum in accels_data]) / metadata['fps']
+    mean_speed_change = total_speed_change / accels_count
+    mean_peak_accel = sum([datum['maxslope'] for datum in accels_data]) * metadata['fps'] / accels_count
+    mean_accel = sum([(datum['meanslope']) for datum in accels_data]) * metadata['fps'] / accels_count
+    mean_accel_dur = total_accel_dur / accels_count
     max_speed_change = max([datum['change'] for datum in accels_data])
-    max_peak_accel = max([datum['maxslope'] for datum in accels_data]) * fps
-    max_accel = max([(datum['meanslope']) for datum in accels_data]) * fps
-    max_accel_dur = Decimal(max([datum['length'] for datum in accels_data])) / fps
+    max_peak_accel = max([datum['maxslope'] for datum in accels_data]) * metadata['fps']
+    max_accel = max([(datum['meanslope']) for datum in accels_data]) * metadata['fps']
+    max_accel_dur = max([datum['length'] for datum in accels_data]) / metadata['fps']
     
     analysis.update({
         'accels_per_min': accels_per_min,
@@ -499,7 +466,7 @@ for file in os.listdir('.'):
     
     export_data(accels_data, path + '/' + videoname + '_accels.csv')
     
-    if spine_analysis:
+    if settings['spine_analysis']:
         
         # load midline points data
         spine_lens = [0 for i in range(l)]
@@ -510,26 +477,29 @@ for file in os.listdir('.'):
                 spine_lens[i] = int(spines[i][0])
                 spine_temp = []
                 for j in range(1, spine_lens[i] + 1):
-                    spine_temp.append([Decimal(spines[i][j * 2 - 1]), Decimal(spines[i][j * 2])])
+                    spine_temp.append([float(spines[i][j * 2 - 1]), float(spines[i][j * 2])])
                 spines[i] = spine_temp
         directions = [0 for i in range(l)]
         turns = [0 for i in range(l)]
-        with open(path + '/' + videoname + '_direction.csv', 'r') as f:
+        with open(path + '/' + videoname + '_directions.csv', 'r') as f:
             direction_temp = [[cell for cell in row] for row in csv.reader(f)]
             direction_temp.pop(0)
             for i in range(l):
-                directions[i] = Decimal(direction_temp[i][0])
-                turns[i] = Decimal(direction_temp[i][1])
-        tails = [0 for i in range(l)]
-        with open(path + '/' + videoname + '_headtail.csv', 'r') as f:
-            headtail = [[cell for cell in row] for row in csv.reader(f)]
-            headtail.pop(0)
-            for i in range(l):
-                tails[i] = [Decimal(headtail[i][2]), Decimal(headtail[i][3])]
+                directions[i] = float(direction_temp[i][0])
+                turns[i] = float(direction_temp[i][1])
         
-        tail_dists = [0 for i in range(l)]
-        for i in range(1, l):
-            tail_dists[i] = pyth(tails[i], tails[i - 1])
+        if settings['find_tip']:
+            tails = [0 for i in range(l)]
+            with open(path + '/' + videoname + '_tails.csv', 'r') as f:
+                tail_temp = [[cell for cell in row] for row in csv.reader(f)]
+                tail_temp.pop(0)
+                for i in range(l):
+                    tails[i] = [float(tail_temp[i][0]), float(tail_temp[i][1])]
+            tail_dists = [0 for i in range(l)]
+            for i in range(1, l):
+                tail_dists[i] = pyth(tails[i], tails[i - 1])
+        else:
+            tails = [spines[i][0] for i in range(l)]
         
         amplitudes = [0 for i in range(l)]
         for i in range(l):
@@ -538,7 +508,7 @@ for file in os.listdir('.'):
             else:
                 m = (spines[i][spine_lens[i] - 1][1] - spines[i][spine_lens[i] - 2][1]) / (spines[i][spine_lens[i] - 1][0] - spines[i][spine_lens[i] - 2][0])
                 c = spines[i][spine_lens[i] - 1][1] - m * spines[i][spine_lens[i] - 1][0]
-                amplitudes[i] = abs(m * tails[i][0] - tails[i][1] + c) / Decimal.sqrt(m ** 2 + 1) * ratio
+                amplitudes[i] = abs(m * tails[i][0] - tails[i][1] + c) / math.sqrt(m ** 2 + 1) * ratio
             
         # calculate tail bend angles, amplitudes, and body curvatures
         spine_angles = [[] for i in range(l)]
@@ -549,8 +519,13 @@ for file in os.listdir('.'):
         spine_angles_filtered = [[] for i in range(l)]
         trunk_curvs_filtered = [0 for i in range(l)]
         total_curvs_filtered = [0 for i in range(l)]
+        error2_frames = []
         
         for i in range(l):
+            
+            if spine_lens[i] < 3:
+                error2_frames.append(i)
+                continue
             
             # calculate direction from one midline point to another, caudal to cranial
             spine_dirs = []
@@ -592,13 +567,21 @@ for file in os.listdir('.'):
                 trunk_curvs_filtered[i] = trunk_curvs[i]
             total_curvs_filtered[i] = trunk_curvs_filtered[i] + abs(cal_direction_change(spine_dirs[0], tail_dir))
         
+        trunk_angles = errors_correct(trunk_angles, error2_frames)
+        tail_angles = errors_correct(tail_angles, error2_frames)
+        amplitudes = errors_correct(amplitudes, error2_frames)
+        trunk_curvs = errors_correct(trunk_curvs, error2_frames)
+        total_curvs = errors_correct(total_curvs, error2_frames)
+        trunk_curvs_filtered = errors_correct(trunk_curvs_filtered, error2_frames)
+        total_curvs_filtered = errors_correct(total_curvs_filtered, error2_frames)
+        
         # directions_free is a list of special running average of direction of locomotion
         # turns is derived from directions_free. unit is rad/frame
         # turning left is -, turning right is +
         directions_free = [0 for i in range(l)]
         directions_free[0] = directions[0]
         for i in range(1, l):
-            directions_free[i] = directions_free[i - 1] + turns[i] / fps
+            directions_free[i] = directions_free[i - 1] + turns[i] / metadata['fps']
         directions_free = list_set(directions_free, window=3, start=0, end=l)
         turns_original = list(turns)
         turns = [0 for i in range(l)]
@@ -623,16 +606,17 @@ for file in os.listdir('.'):
             else:
                 return False
         def turns_criteria_peak(datum):
-            if datum['length'] >= int(min_turn_dur * fps) and datum['height'] * fps >= min_max_turn_velocity and datum['auc'] >= min_turn_angle:
-                return True
-            else:
-                return False
-        turns_p_data = get_peaks(turns.p_list, turns.p_list, turn_cutoff / fps,
+            if datum['length'] >= int(settings['min_turn_dur'] * metadata['fps']):
+                if datum['height'] * metadata['fps'] >= settings['min_max_turn_velocity']:
+                    if datum['auc'] >= settings['min_turn_angle']:
+                        return True
+            return False
+        turns_p_data = get_peaks(turns.p_list, turns.p_list, settings['turn_cutoff'] / metadata['fps'],
                                  turns_criteria_f, turns_criteria_b, turns_criteria_peak)
-        turns_n_data = get_peaks(turns.n_list, turns.n_list, turn_cutoff / fps,
+        turns_n_data = get_peaks(turns.n_list, turns.n_list, settings['turn_cutoff'] / metadata['fps'],
                                  turns_criteria_f, turns_criteria_b, turns_criteria_peak)
         
-        if plot_figure:
+        if settings['plot_figure']:
             fig, ax = plt.subplots()
             #ax.plot(turns.original_list, c='y')
             ax.plot(turns.list)
@@ -655,17 +639,19 @@ for file in os.listdir('.'):
         for step in turns_p_steps:
             step.kind['measure'] = 'turn'
             step.kind['laterality'] = 'right'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = step.peak_datum['auc'] * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['height'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = step.peak_datum['auc']
+            step.properties['angular_velocity'] = step.properties['angle'] / step.properties['dur']
+            step.properties['max_angular_velocity'] = step.peak_datum['height'] * metadata['fps']
             steps.append(step)
         turns_n_steps = find_steps(turns_n_data, cen_dists, speeds.list, cdist1s)
         for step in turns_n_steps:
             step.kind['measure'] = 'turn'
             step.kind['laterality'] = 'left'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = step.peak_datum['auc'] * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['height'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = step.peak_datum['auc']
+            step.properties['angular_velocity'] = step.properties['angle'] / step.properties['dur']
+            step.properties['max_angular_velocity'] = step.peak_datum['height'] * metadata['fps']
             steps.append(step)
         
         # unit is rad/frame. turning left is +, turning right is -
@@ -686,12 +672,13 @@ for file in os.listdir('.'):
             else:
                 return False
         def trunk_angles_p_criteria_peak(datum):
-            if datum['length'] >= int(min_bend_dur * fps) and datum['maxslope'] * fps >= min_bend_speed and datum['change'] >= min_bend_angle:
-                return True
-            else:
-                return False
+            if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']):
+                if datum['maxslope'] * metadata['fps'] >= settings['min_bend_speed']:
+                    if datum['change'] >= settings['min_bend_angle']:
+                        return True
+            return False
         trunk_angles_p_data = get_peaks(trunk_angles_ddt.p_list, trunk_angles.list,
-                                        bend_cutoff / fps,
+                                        settings['bend_cutoff'] / metadata['fps'],
                                         trunk_angles_p_criteria_f,
                                         trunk_angles_p_criteria_b,
                                         trunk_angles_p_criteria_peak)
@@ -706,12 +693,13 @@ for file in os.listdir('.'):
             else:
                 return False
         def trunk_angles_n_criteria_peak(datum):
-            if datum['length'] >= int(min_bend_dur * fps) and abs(datum['maxslope']) * fps >= min_bend_speed and abs(datum['change']) >= min_bend_angle:
-                return True
-            else:
-                return False
+            if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']):
+                if abs(datum['maxslope']) * metadata['fps'] >= settings['min_bend_speed']:
+                    if abs(datum['change']) >= settings['min_bend_angle']:
+                        return True
+            return False
         trunk_angles_n_data = get_peaks(trunk_angles_ddt.n_list, trunk_angles.list,
-                                        bend_cutoff / fps,
+                                        settings['bend_cutoff'] / metadata['fps'],
                                         trunk_angles_n_criteria_f,
                                         trunk_angles_n_criteria_b,
                                         trunk_angles_n_criteria_peak)
@@ -729,10 +717,10 @@ for file in os.listdir('.'):
                 step.kind['mode'] = 'bilateral'
             else:
                 step.kind['mode'] = 'recoil'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = step.peak_datum['change'] * 180 / pi
-            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * fps * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = step.peak_datum['change']
+            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         trunk_angles_n_steps = find_steps(trunk_angles_n_data, cen_dists, speeds.list, cdist1s)
         for step in trunk_angles_n_steps:
@@ -747,13 +735,13 @@ for file in os.listdir('.'):
                 step.kind['mode'] = 'bilateral'
             else:
                 step.kind['mode'] = 'recoil'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = -step.peak_datum['change'] * 180 / pi
-            step.properties['angular_velocity'] = -step.peak_datum['meanslope'] * fps * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = -step.peak_datum['change']
+            step.properties['angular_velocity'] = -step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         
-        if plot_figure:
+        if settings['plot_figure']:
             
             fig, ax = plt.subplots()
             ax.plot(trunk_angles.list)
@@ -785,12 +773,12 @@ for file in os.listdir('.'):
             else:
                 return False
         def tail_angles_p_criteria_peak(datum):
-            if datum['length'] >= int(min_bend_dur * fps) and datum['maxslope'] * fps >= min_bend_speed and datum['change'] >= min_bend_angle:
+            if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']) and datum['maxslope'] * metadata['fps'] >= settings['min_bend_speed'] and datum['change'] >= settings['min_bend_angle']:
                 return True
             else:
                 return False
         tail_angles_p_data = get_peaks(tail_angles_ddt.p_list, tail_angles.list,
-                                       bend_cutoff / fps,
+                                       settings['bend_cutoff'] / metadata['fps'],
                                        tail_angles_p_criteria_f, tail_angles_p_criteria_b,
                                        tail_angles_p_criteria_peak)
         def tail_angles_n_criteria_f(slope, lst):
@@ -804,12 +792,12 @@ for file in os.listdir('.'):
             else:
                 return False
         def tail_angles_n_criteria_peak(datum):
-            if datum['length'] >= int(min_bend_dur * fps) and abs(datum['maxslope']) * fps >= min_bend_speed and abs(datum['change']) >= min_bend_angle:
+            if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']) and abs(datum['maxslope']) * metadata['fps'] >= settings['min_bend_speed'] and abs(datum['change']) >= settings['min_bend_angle']:
                 return True
             else:
                 return False
         tail_angles_n_data = get_peaks(tail_angles_ddt.n_list, tail_angles.list,
-                                       bend_cutoff / fps,
+                                       settings['bend_cutoff'] / metadata['fps'],
                                        tail_angles_n_criteria_f, tail_angles_n_criteria_b,
                                        tail_angles_n_criteria_peak)
         
@@ -826,10 +814,10 @@ for file in os.listdir('.'):
                 step.kind['mode'] = 'bilateral'
             else:
                 step.kind['mode'] = 'recoil'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = step.peak_datum['change'] * 180 / pi
-            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * fps * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = step.peak_datum['change']
+            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         tail_angles_n_steps = find_steps(tail_angles_n_data, cen_dists, speeds.list, cdist1s)
         for step in tail_angles_n_steps:
@@ -844,13 +832,13 @@ for file in os.listdir('.'):
                 step.kind['mode'] = 'bilateral'
             else:
                 step.kind['mode'] = 'recoil'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = -step.peak_datum['change'] * 180 / pi
-            step.properties['angular_velocity'] = -step.peak_datum['meanslope'] * fps * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = -step.peak_datum['change']
+            step.properties['angular_velocity'] = -step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         
-        if plot_figure:
+        if settings['plot_figure']:
             
             fig, ax = plt.subplots()
             ax.plot(tail_angles.list)
@@ -882,12 +870,13 @@ for file in os.listdir('.'):
             else:
                 return False
         def amplitudes_p_criteria_peak(datum):
-            if datum['length'] >= int(min_amplitude_dur * fps) and datum['maxslope'] * fps >= min_amplitude_dt and datum['change'] >= min_amplitude:
-                return True
-            else:
-                return False
+            if datum['length'] >= int(settings['min_amplitude_dur'] * metadata['fps']):
+                if datum['maxslope'] * metadata['fps'] >= settings['min_amplitude_dt']:
+                    if datum['change'] >= settings['min_amplitude']:
+                        return True
+            return False
         amplitudes_p_data = get_peaks(amplitudes_ddt.p_list, amplitudes.list,
-                                      amplitude_cutoff / fps,
+                                      settings['amplitude_cutoff'] / metadata['fps'],
                                       amplitudes_p_criteria_f, amplitudes_p_criteria_b,
                                       amplitudes_p_criteria_peak)
         def amplitudes_n_criteria_f(slope, lst):
@@ -901,12 +890,13 @@ for file in os.listdir('.'):
             else:
                 return False
         def amplitudes_n_criteria_peak(datum):
-            if datum['length'] >= int(min_amplitude_dur * fps) and abs(datum['maxslope']) * fps >= min_amplitude_dt and abs(datum['change']) >= min_amplitude:
-                return True
-            else:
-                return False
+            if datum['length'] >= int(settings['min_amplitude_dur'] * metadata['fps']):
+                if abs(datum['maxslope']) * metadata['fps'] >= settings['min_amplitude_dt']:
+                    if abs(datum['change']) >= settings['min_amplitude']:
+                        return True
+            return False
         amplitudes_n_data = get_peaks(amplitudes_ddt.n_list, amplitudes.list,
-                                      amplitude_cutoff / fps,
+                                      settings['amplitude_cutoff'] / metadata['fps'],
                                       amplitudes_n_criteria_f, amplitudes_n_criteria_b,
                                       amplitudes_n_criteria_peak)
         
@@ -923,10 +913,10 @@ for file in os.listdir('.'):
                 step.kind['mode'] = 'bilateral'
             else:
                 step.kind['mode'] = 'recoil'
-            step.properties['dur'] = step.peak_datum['length'] / fps
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
             step.properties['angle'] = step.peak_datum['change']
-            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * fps
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps
+            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         amplitudes_n_steps = find_steps(amplitudes_n_data, cen_dists, speeds.list, cdist1s)
         for step in amplitudes_n_steps:
@@ -941,13 +931,13 @@ for file in os.listdir('.'):
                 step.kind['mode'] = 'bilateral'
             else:
                 step.kind['mode'] = 'recoil'
-            step.properties['dur'] = step.peak_datum['length'] / fps
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
             step.properties['angle'] = -step.peak_datum['change']
-            step.properties['angular_velocity'] = -step.peak_datum['meanslope'] * fps
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps
+            step.properties['angular_velocity'] = -step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         
-        if plot_figure:
+        if settings['plot_figure']:
         
             fig, ax = plt.subplots()
             ax.plot(amplitudes.list)
@@ -973,25 +963,25 @@ for file in os.listdir('.'):
             else:
                 return False
         def trunk_curvs_criteria_peak(datum):
-            if datum['length'] >= int(min_bend_dur * fps) and datum['maxslope'] * fps >= min_bend_speed and datum['upheight'] >= min_bend_angle:
+            if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']) and datum['maxslope'] * metadata['fps'] >= settings['min_bend_speed'] and datum['upheight'] >= settings['min_bend_angle']:
                 return True
             else:
                 return False
         trunk_curvs_data = get_peaks(trunk_curvs_filtered.list, trunk_curvs_filtered.list,
-                                     bend_cutoff / fps, trunk_curvs_criteria_f,
+                                     settings['bend_cutoff'] / metadata['fps'], trunk_curvs_criteria_f,
                                      trunk_curvs_criteria_b, trunk_curvs_criteria_peak)
         
         trunk_curvs_steps = find_steps(trunk_curvs_data, cen_dists, speeds.list, cdist1s)
         for step in trunk_curvs_steps:
             step.kind['measure'] = 'tail bend'
             step.kind['method'] = 'trunk curvature'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = step.peak_datum['upheight'] * 180 / pi
-            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * fps * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = step.peak_datum['upheight']
+            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         
-        if plot_figure:
+        if settings['plot_figure']:
             fig, ax = plt.subplots()
             ax.plot(trunk_curvs_filtered.list)
             for datum in trunk_curvs_data:
@@ -1014,25 +1004,25 @@ for file in os.listdir('.'):
             else:
                 return False
         def total_curvs_criteria_peak(datum):
-            if datum['length'] >= int(min_bend_dur * fps) and datum['maxslope'] * fps >= min_bend_speed and datum['upheight'] >= min_bend_angle:
+            if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']) and datum['maxslope'] * metadata['fps'] >= settings['min_bend_speed'] and datum['upheight'] >= settings['min_bend_angle']:
                 return True
             else:
                 return False
         total_curvs_data = get_peaks(total_curvs_filtered.list, total_curvs_filtered.list,
-                                     bend_cutoff / fps, total_curvs_criteria_f,
+                                     settings['bend_cutoff'] / metadata['fps'], total_curvs_criteria_f,
                                      total_curvs_criteria_b, total_curvs_criteria_peak)
         
         total_curvs_steps = find_steps(total_curvs_data, cen_dists, speeds.list, cdist1s)
         for step in total_curvs_steps:
             step.kind['measure'] = 'tail bend'
             step.kind['method'] = 'total curvature'
-            step.properties['dur'] = step.peak_datum['length'] / fps
-            step.properties['angle'] = step.peak_datum['upheight'] * 180 / pi
-            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * fps * 180 / pi
-            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * fps * 180 / pi
+            step.properties['dur'] = step.peak_datum['length'] / metadata['fps']
+            step.properties['angle'] = step.peak_datum['upheight']
+            step.properties['angular_velocity'] = step.peak_datum['meanslope'] * metadata['fps']
+            step.properties['max_angular_velocity'] = step.peak_datum['maxslope'] * metadata['fps']
             steps.append(step)
         
-        if plot_figure:
+        if settings['plot_figure']:
             fig, ax = plt.subplots()
             ax.plot(total_curvs_filtered.list)
             for datum in total_curvs_data:
@@ -1131,7 +1121,7 @@ for file in os.listdir('.'):
             for properti in step_datum(None).properties.keys():
                 for kinematic in step_datum(None).kinematics.keys():
                     correlation = steps_correlate(steps, kind_criterion, properti,
-                                                  kinematic, correlation_portion)
+                                                  kinematic, settings['correlation_portion'])
                     steps_correlation = {'operation': 'correlation'}
                     steps_correlation.update(kind_criterion)
                     steps_correlation.update({
@@ -1141,7 +1131,7 @@ for file in os.listdir('.'):
                     steps_correlation.update(correlation)
                     steps_correlations.append(steps_correlation)
                     correlation = steps_correlate(steps, kind_criterion, kinematic,
-                                                  properti, correlation_portion)
+                                                  properti, settings['correlation_portion'])
                     steps_correlation = {'operation': 'correlation'}
                     steps_correlation.update(kind_criterion)
                     steps_correlation.update({
