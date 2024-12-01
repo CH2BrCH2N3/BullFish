@@ -20,7 +20,7 @@ default_settings = {
     "contour_points_dist": 12,
     "turn_max": 6000,
     "show_errors": 1,
-    'find_tip': 1,
+    'find_s0': 1,
     "auto_bg": 1,
     "fish_cover_size": 1.5,
     "threshold2_reduction": 0,
@@ -117,7 +117,7 @@ for file in os.listdir('.'):
         
         t_sampling = settings['t_sampling_time'] * metadata['fps'] * metadata['downsampling'] # calculate threshold once every how many frames
         threshold1s = [0 for i in range(l)]
-        if settings['find_tip']:
+        if settings['find_s0']:
             threshold2s = [0 for i in range(l)]
             leftmosts = [0 for i in range(l)]
             rightmosts = [0 for i in range(l)]
@@ -135,17 +135,19 @@ for file in os.listdir('.'):
                         i = 0
                         for row in reader:
                             threshold1s[i] = int(row['threshold1'])
-                            if settings['find_tip']:
+                            if settings['find_s0']:
                                 leftmosts[i] = int(row['leftmost'])
                                 rightmosts[i] = int(row['rightmost'])
                                 topmosts[i] = int(row['topmost'])
                                 bottommosts[i] = int(row['bottommost'])
                                 threshold2s[i] = int(row['threshold2'])
                             i += 1
-                    if settings['find_tip']:
+                    if settings['find_s0']:
                         print('Loading background...')
                         background = cv.imread(path + '/' + videoname + '_background.png')
                         background = cv.cvtColor(background, cv.COLOR_BGR2GRAY)
+                        with open(path + '/' + videoname + '_fish_perimeter2_est.txt', 'r') as f:
+                            fish_perimeter2_est = float(f.read())
                     create_trackdata = False
                 elif response != 'o':
                     print('Try again')
@@ -169,7 +171,7 @@ for file in os.listdir('.'):
                     threshold1s[i] = max_entropy_threshold(frame_b, settings['threshold1_reduction'])
                     ret, t1frame = cv.threshold(frame_b, threshold1s[i], 255, cv.THRESH_BINARY_INV)
                     
-                    if settings['find_tip']:
+                    if settings['find_s0']:
                         contours, hierarchy = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
                         contour_number = len(contours)
                         max_perimeter = 0
@@ -212,7 +214,7 @@ for file in os.listdir('.'):
                 threshold1s[i] = threshold1s[start]
                 i += 1
             
-            if settings['find_tip']:
+            if settings['find_s0']:
                 
                 if not settings['auto_bg']:
                     
@@ -321,7 +323,7 @@ for file in os.listdir('.'):
         if settings['save_binaryvideo']:
             c = settings['save_binaryvideo']
             binary1 = cv.VideoWriter(path + '/' + videoname + '_t1.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']), 0)
-            if settings['find_tip']:
+            if settings['find_s0']:
                 binary2 = cv.VideoWriter(path + '/' + videoname + '_t2.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']), 0)
         if settings['save_annotatedvideo']:
             c = settings['save_annotatedvideo']
@@ -340,6 +342,7 @@ for file in os.listdir('.'):
         errors = {
             'fish_not_found': [],
             'tail_not_found': [],
+            'fish_too_short': [],
             'high_turn': []
             }
         
@@ -437,12 +440,15 @@ for file in os.listdir('.'):
                         fish_lengths[i] += pyth(spine[i][ii - 1], spine[i][ii])
                     fish_lengths[i] += pyth(spine[i][spine_len[i] - 1], heads[i])
                     
+                    if spine_len[i] < 3:
+                        errors['fish_too_short'].append(i)
+                    
                     if i > 0:
                         turns[i] = cal_direction_change(directions[i - 1], directions[i]) * metadata['fps']
                         if turns[i] > settings['turn_max']:
                             errors['high_turn'].append(i)
                     
-                    if settings['find_tip']:
+                    if settings['find_s0']:
                         
                         midpt = spine[i][spine_len[i] // 2]
                         fish_perimeter2_est = median(fish_perimeter2s)
@@ -515,7 +521,7 @@ for file in os.listdir('.'):
                             cv.circle(aframe, (round(spine[i][ii][0]), round(spine[i][ii][1])), 2, (colorn, 255 - colorn // 2, 255 - colorn), -1)
                         heads[i] = fish_contour1_points[head_index]
                         cv.circle(aframe, (round(heads[i][0]), round(heads[i][1])), 3, (255, 0, 127), -1)
-                        if settings['find_tip']:
+                        if settings['find_s0']:
                             cv.circle(aframe, (round(tails[i][0]), round(tails[i][1])), 3, (255, 0, 255), -1)
                     annotated.write(aframe)
             
@@ -531,7 +537,7 @@ for file in os.listdir('.'):
         video.release()
         if settings['save_binaryvideo']:
             binary1.release()
-            if settings['find_tip']:
+            if settings['find_s0']:
                 binary2.release() 
         if settings['save_annotatedvideo']:
             annotated.release()
@@ -542,7 +548,7 @@ for file in os.listdir('.'):
                 f.write(key + ',' + str(metadata[key]) + '\n')
         
         with open(path + '/' + videoname + '_trackdata.csv', 'w', newline='') as f:
-            if settings['find_tip']:
+            if settings['find_s0']:
                 fieldnames = ['threshold1', 'fish_perimeter', 'leftmost', 'rightmost', 'topmost', 'bottommost', 'threshold2']
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
@@ -561,6 +567,9 @@ for file in os.listdir('.'):
                 for i in range(l):
                     writer.writerow({'threshold1': threshold1s[i],
                                      'fish_perimeter': fish_perimeters[i]})
+        
+        with open(path + '/' + videoname + '_fish_perimeter2_est.txt', 'w') as f:
+            f.write(str(fish_perimeter2_est))
         
         with open(path + '/' + videoname + '_cen.csv', 'w') as f:
             header = ['centroidX', 'centroidY']
@@ -593,8 +602,8 @@ for file in os.listdir('.'):
                         f.write(str(cell) + ',')
                     f.write('\n')
             
-            with open(path + '/' + videoname + '_heads.csv', 'w') as f:
-                header = ['Head_x', 'Head_y']
+            with open(path + '/' + videoname + '_sn+1s.csv', 'w') as f:
+                header = ['sn+1_x', 'sn+1_y']
                 for word in header:
                     f.write(str(word) + ',')
                 f.write('\n')
@@ -604,9 +613,9 @@ for file in os.listdir('.'):
                         f.write(str(cell) + ',')
                     f.write('\n')
             
-            if settings['find_tip']:
-                with open(path + '/' + videoname + '_tails.csv', 'w') as f:
-                    header = ['Tail_x', 'Tail_y']
+            if settings['find_s0']:
+                with open(path + '/' + videoname + '_s0s.csv', 'w') as f:
+                    header = ['s0_x', 's0_y']
                     for word in header:
                         f.write(str(word) + ',')
                     f.write('\n')
