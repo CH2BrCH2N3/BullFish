@@ -36,4 +36,23 @@ def frame_rotate(frame, x, y, angle, rm=None):
     elif angle == 180:
         return cv.rotate(frame, cv.ROTATE_180)
     else:
+        return frame.copy()
+
+def frame_crop(frame, crop_tlx, crop_tly, crop_x, crop_y):
+    crop_brx = crop_tlx + crop_x
+    crop_bry = crop_tly + crop_y
+    if crop_x != 0 and crop_y != 0:
+        return frame[crop_tly:crop_bry, crop_tlx:crop_brx]
+    else:
         return frame
+
+def frame_grc(frame, x, y, rotate, rm, crop_tlx, crop_tly, crop_x, crop_y):
+    frame_t = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
+    frame_t = frame_rotate(frame_t, x, y, rotate, rm)
+    return frame_crop(frame_t, crop_tlx, crop_tly, crop_x, crop_y)
+
+def frame_blur(frame, ksize):
+    if ksize > 0:
+        return cv.GaussianBlur(frame, (ksize, ksize), 0)
+    else:
+        return frame.copy()
