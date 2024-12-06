@@ -7,7 +7,7 @@ from copy import deepcopy
 from traceback import print_exc
 from statistics import median
 from BullFish_pkg.general import csvtodict, load_settings
-from BullFish_pkg.math import pyth, cal_direction, cal_direction_change
+from BullFish_pkg.math import cal_direction, cal_direction_change
 from BullFish_pkg.cv_editing import get_rm, frame_grc, frame_blur
 
 default_settings = {
@@ -24,11 +24,9 @@ default_settings = {
     "auto_bg": 1,
     "fish_cover_size": 1.5,
     "threshold2_reduction": 0,
-    "tail2_range": 0.7
-}
+    "tail2_range": 0.7}
 
 print('Welcome to BullFish_tracker.')
-
 settings = load_settings('tracker', default_settings)
 
 def max_entropy_threshold(image, threshold_reduction):
@@ -128,7 +126,7 @@ for file in os.listdir('.'):
         create_trackdata = True
         if os.path.exists(path + '/' + videoname + '_trackdata.csv'):
             while True:
-                response = input('Trackdata has already been created. Skip this step? [y]/o')
+                response = input('Trackdata has already been created. Enter y to skip this step, o to overwrite:')
                 if response == 'y':        
                     with open(path + '/' + videoname + '_trackdata.csv', 'r') as f:
                         reader = csv.DictReader(f)
@@ -436,9 +434,6 @@ for file in os.listdir('.'):
                             spine[i].append(((current_point[0] + cor_point[0]) / 2, (current_point[1] + cor_point[1]) / 2))
                     
                     directions[i] = cal_direction(spine[i][spine_len[i] - 2], spine[i][spine_len[i] - 1])
-                    for ii in range(1, spine_len[i]):
-                        fish_lengths[i] += pyth(spine[i][ii - 1], spine[i][ii])
-                    fish_lengths[i] += pyth(spine[i][spine_len[i] - 1], heads[i])
                     
                     if spine_len[i] < 3:
                         errors['fish_too_short'].append(i)
@@ -636,10 +631,6 @@ for file in os.listdir('.'):
                     for cell in row:
                         f.write(str(cell) + ',')
                     f.write('\n')
-            
-            with open(path + '/' + videoname + '_fishlengths.csv', 'w') as f:
-                for i in range(l):
-                    f.write(str(fish_lengths[i]) + ', \n')
                 
         print('Tracking of ' + videoname + ' complete.')
         
