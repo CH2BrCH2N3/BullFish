@@ -1,10 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Dec 24 14:52:22 2024
-
-@author: Sunny
-"""
-
 import pandas as pd
 import scipy.stats
 import statsmodels.api as sm
@@ -14,6 +7,41 @@ from numpy import nan
 df = pd.read_csv('analyses_df_adjusted.csv')
 t = '6OH'
 c = 'veh'
+
+def t_test(df, Type):
+    dfs = df[(df['Type'] == Type) & (pd.isna(df['Classify'])) & (pd.isna(df['Stratify']))]
+    results = []
+    for i in range(len(dfs)):
+        s = dfs.iloc[i]
+        st = []
+        sc = []
+        for name in dfs.columns:
+            if t in name:
+                st.append(s[name])
+            if c in name:
+                sc.append(s[name])
+        st = pd.Series(st)
+        sc = pd.Series(sc)
+        test = scipy.stats.ttest_ind(st, sc, equal_var=False)
+        ci = test.confidence_interval()
+        result = {
+            'Type': Type,
+            'Parameter': s['Parameter'],
+            'Method': s['Method'],
+            t + '_mean': st.mean(),
+            c + '_mean': sc.mean(),
+            't': test.statistic,
+            'low t': ci[0],
+            'hi t': ci[1],
+            'p': test.pvalue}
+        results.append(result)
+    return pd.DataFrame(results)
+
+t_test_results = pd.DataFrame()
+t_test_results = pd.concat([t_test_results, t_test(df, 'bend')])
+t_test_results = pd.concat([t_test_results, t_test(df, 'recoil')])
+t_test_results = pd.concat([t_test_results, t_test(df, 'step')])
+t_test_results.to_csv('t_test_results.csv', index=False)
 
 def compare(df, Type, a, b):
     dfa = df[(df['Type'] == Type) & (df['Classify'] == a) & (pd.isna(df['Stratify']))]
@@ -50,6 +78,10 @@ def compare(df, Type, a, b):
         anova_table = sm.stats.anova_lm(model, typ=2)
         result = anova_table['PR(>F)'].T
         result.pop('Residual')
+        result[t + '_a'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a), 'Value'].mean()
+        result[t + '_b'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b), 'Value'].mean()
+        result[c + '_a'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a), 'Value'].mean()
+        result[t + '_b'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b), 'Value'].mean()
         result['Type'] = Type
         result['Parameter'] = parameter
         result['Method'] = method
@@ -64,7 +96,7 @@ compare_results = pd.concat([compare_results, compare(df, 'step', 'HT', 'MT')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'turn left', 'turn right')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'with turn', 'without turn')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'bend left', 'bend right')])
-compare_results.to_csv('compare_results.csv')
+compare_results.to_csv('compare_results.csv', index=False)
 
 def stratify(df):
     dfs = df[(pd.isna(df['Classify'])) & (pd.notna(df['Stratify']))]
@@ -106,6 +138,12 @@ def stratify(df):
         anova_table = sm.stats.anova_lm(model, typ=2)
         result = anova_table['PR(>F)'].T
         result.pop('Residual')
+        result[t + '_l'] = data.loc[(data['Treatment'] == t) & (data['Stratify'] == Sl['Stratify']), 'Value'].mean()
+        result[t + '_m'] = data.loc[(data['Treatment'] == t) & (data['Stratify'] == Sm['Stratify'].iloc[0]), 'Value'].mean()
+        result[t + '_h'] = data.loc[(data['Treatment'] == t) & (data['Stratify'] == Sh['Stratify'].iloc[0]), 'Value'].mean()
+        result[c + '_l'] = data.loc[(data['Treatment'] == c) & (data['Stratify'] == Sl['Stratify']), 'Value'].mean()
+        result[c + '_m'] = data.loc[(data['Treatment'] == c) & (data['Stratify'] == Sm['Stratify'].iloc[0]), 'Value'].mean()
+        result[c + '_h'] = data.loc[(data['Treatment'] == c) & (data['Stratify'] == Sh['Stratify'].iloc[0]), 'Value'].mean()
         result['Parameter'] = parameter
         result['Stratify'] = strat
         results = pd.concat([results, pd.DataFrame(result).T])
@@ -113,7 +151,7 @@ def stratify(df):
 
 stratify_results = pd.DataFrame()
 stratify_results = pd.concat([stratify_results, stratify(df)])
-stratify_results.to_csv('stratify_results.csv')
+stratify_results.to_csv('stratify_results.csv', index=False)
 
 def threeway(df, a, b):
     dfa = df[(df['Classify'] == a) & (pd.notna(df['Stratify'])) & (df['Method'] != 'count')]
@@ -189,6 +227,18 @@ def threeway(df, a, b):
         anova_table = sm.stats.anova_lm(model, typ=3)
         result = anova_table['PR(>F)'].T
         result.pop('Residual')
+        result[t + '_a_l'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a) & (data['Stratify'] == sal['Stratify']), 'Value'].mean()
+        result[t + '_a_m'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a) & (data['Stratify'] == sam['Stratify'].iloc[0]), 'Value'].mean()
+        result[t + '_a_h'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a) & (data['Stratify'] == sah['Stratify'].iloc[0]), 'Value'].mean()
+        result[t + '_b_l'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b) & (data['Stratify'] == sbl['Stratify'].iloc[0]), 'Value'].mean()
+        result[t + '_b_m'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b) & (data['Stratify'] == sbm['Stratify'].iloc[0]), 'Value'].mean()
+        result[t + '_b_h'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b) & (data['Stratify'] == sbh['Stratify'].iloc[0]), 'Value'].mean()
+        result[c + '_a_l'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a) & (data['Stratify'] == sal['Stratify']), 'Value'].mean()
+        result[c + '_a_m'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a) & (data['Stratify'] == sam['Stratify'].iloc[0]), 'Value'].mean()
+        result[c + '_a_h'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a) & (data['Stratify'] == sah['Stratify'].iloc[0]), 'Value'].mean()
+        result[c + '_b_l'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b) & (data['Stratify'] == sbl['Stratify'].iloc[0]), 'Value'].mean()
+        result[c + '_b_m'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b) & (data['Stratify'] == sbm['Stratify'].iloc[0]), 'Value'].mean()
+        result[c + '_b_h'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b) & (data['Stratify'] == sbh['Stratify'].iloc[0]), 'Value'].mean()
         result['Parameter'] = parameter
         result['Group'] = a + ' vs ' + b
         result['Stratify'] = strat
@@ -199,4 +249,4 @@ threeway_results = pd.DataFrame()
 threeway_results = pd.concat([threeway_results, threeway(df, 'turn left', 'turn right')])
 threeway_results = pd.concat([threeway_results, threeway(df, 'with turn', 'without turn')])
 threeway_results = pd.concat([threeway_results, threeway(df, 'bend left', 'bend right')])
-threeway_results.to_csv('threeway_results.csv')
+threeway_results.to_csv('threeway_results.csv', index=False)
