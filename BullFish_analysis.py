@@ -2,10 +2,13 @@ import os
 import csv
 import matplotlib.pyplot as plt
 import math
+import numpy as np
 import pandas as pd
 import scipy.stats
 from scipy.signal import find_peaks
 from copy import copy, deepcopy
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
 from BullFish_pkg.math import pyth, cal_direction, cal_direction_change
 from BullFish_pkg.general import csvtodict, load_settings
 
@@ -20,6 +23,7 @@ default_settings = {
     "min_max_accel": 0,
     "min_speed_change": 0,
     "spine_analysis": 1,
+    'alternate_turn': 0,
     "turn_cutoff": 2,
     "min_turn_dur": 0.02,
     "min_max_turn_velocity": 0,
@@ -196,10 +200,10 @@ class step_datum:
             'velocity change': 0,
             'accel': 0,
             'step dur': 0,
-            'turn angle': None,
+            'turn angle': 0,
             'turn laterality': 'neutral',
-            'turn dur': None,
-            'turn angular velocity': None,
+            'turn dur': 0,
+            'turn angular velocity': 0,
             'bend angle reached': 0,
             'bend laterality': 'neutral',
             'bend angle traveled': 0,
@@ -208,78 +212,13 @@ class step_datum:
             'bend pos': 0,
             'mode': 'UK'}
 
-def agg(df, analysis_dict, methods):
-    analysis_list = []
-    df_agg = df.agg(methods)
-    for i in df_agg.columns:
-        for j in df_agg.index:
-            if df_agg.at[j, i] == math.nan:
-                continue
-            value_dict = copy(analysis_dict)
-            value_dict.update({'Stratify': None,
-                               'Parameter': i,
-                               'Method': j,
-                               'Value': df_agg.at[j, i]})
-            analysis_list.append(value_dict)
-    value_dict = copy(analysis_dict)
-    value_dict.update({'Stratify': None,
-                       'Parameter': None,
-                       'Method': 'count',
-                       'Value': len(df)})
-    analysis_list.append(value_dict)
-    return analysis_list
-'''
-def df_dict(df, name, name2=''):
-    dic = df.to_dict()
-    new_dic = {}
-    for key1 in dic.keys():
-        if type(key1) == str:
-            for key2 in dic[key1].keys():
-                new_dic.update({name + '_' + key1 + '_' + key2: dic[key1][key2]})
-        elif type(key1) == tuple:
-            name1 = ''
-            for i in key1:
-                name1 += ('_' + i)
-            for key2 in dic[key1].keys():
-                new_dic.update({name + '_' + name2 + '_' + key2 + name1: dic[key1][key2]})
-    return new_dic
-'''
-def compare(s1, s2):
-    result = scipy.stats.ttest_ind(s1, s2, equal_var=False)
-    ci = result.confidence_interval()
-    dic = {
-        's1 mean': s1.mean(),
-        's2 mean': s2.mean(),
-        't': result.statistic,
-        'low t': ci[0],
-        'hi t': ci[1],
-        'p': result.pvalue}
-    return dic
-'''
-def stratify(df):
-    
-    intervals_df = df.describe()
-    axis1 = step_datum().properties
-    stratify_df = pd.DataFrame()
-    for i in axis1.keys():
-        if type(axis1[i]) == str:
-            continue
-        axis2 = copy(axis1)
-        axis2.pop(i)
-        axis2 = axis2.keys()
-        df1 = df.loc[df[i] <= intervals_df.loc['25%'][i], axis2]
-        df2 = df.loc[(df[i] > intervals_df.loc['25%'][i]) & (df[i] < intervals_df.loc['75%'][i]), axis2]
-        df3 = df.loc[df[i] >= intervals_df.loc['75%'][i], axis2]
-        df1_mean = pd.DataFrame(df1.mean(numeric_only=True)).T
-        df1_mean['stratify by'] = i + '_1'
-        df2_mean = pd.DataFrame(df2.mean(numeric_only=True)).T
-        df2_mean['stratify by'] = i + '_2'
-        df3_mean = pd.DataFrame(df3.mean(numeric_only=True)).T
-        df3_mean['stratify by'] = i + '_3'
-        mean_df = pd.concat([df1_mean, df2_mean, df3_mean])
-        stratify_df = pd.concat([stratify_df, mean_df])
-    stratify_df = stratify_df.set_index('stratify by')
-    return stratify_df
+num_properties = step_datum().properties
+num_keys = step_datum().properties.keys()
+for key in num_keys:
+    if type(num_properties[key]) == str:
+        num_properties.pop(key)
+num_keys = num_properties.keys()
+
 '''
 def stratify(df, analysis_dict):
     analysis_list = []
@@ -317,6 +256,172 @@ def stratify(df, analysis_dict):
                                'Value': df3_mean.at[j]})
             analysis_list.append(value_dict)
     return analysis_list
+'''
+
+def result_dict(Type, Classify, Stratify, Parameter, Method, Value):
+    return {'Type': Type,
+            'Classify': Classify,
+            'Stratify': Stratify,
+            'Parameter': Parameter,
+            'Method': Method,
+            'Value': Value}
+
+class DF:
+    
+    def __init__(self, df, Type, params):
+        self.df = df
+        self.Type = Type
+        self.params = params
+        self.dfs = {}
+        self.intervals = self.df.describe()
+    
+    def agg(self, methods, dfname=None):
+        analysis_list = []
+        if dfname == None:
+            df = self.df
+        else:
+            df = self.dfs[dfname]
+        df_agg = df.agg(methods)
+        for i in df_agg.columns:
+            for j in df_agg.index:
+                analysis_list.append(result_dict(self.Type, dfname, None, i, j, df_agg.at[j, i]))
+        analysis_list.append(result_dict(self.Type, dfname, None, None, 'count', len(df)))
+        return pd.DataFrame(analysis_list)
+    
+    def stratify(self):
+        analysis_list = []
+        df = self.df
+        for i in self.params:
+            keys = copy(list(self.params))
+            keys.remove(i)
+            df1 = df.loc[df[i] <= self.intervals.loc['25%'][i], keys]
+            df2 = df.loc[(df[i] > self.intervals.loc['25%'][i]) & (df[i] < self.intervals.loc['75%'][i]), keys]
+            df3 = df.loc[df[i] >= self.intervals.loc['75%'][i], keys]
+            df1_mean = df1.mean(numeric_only=True)
+            df2_mean = df2.mean(numeric_only=True)
+            df3_mean = df3.mean(numeric_only=True)
+            for j in keys:
+                analysis_list.append(result_dict(self.Type, None, i + '_low', j, 'mean', df1_mean.at[j]))
+                analysis_list.append(result_dict(self.Type, None, i + '_mid', j, 'mean', df2_mean.at[j]))
+                analysis_list.append(result_dict(self.Type, None, i + '_high', j, 'mean', df3_mean.at[j]))
+        return pd.DataFrame(analysis_list)
+    
+    def stratify2(self, dfnamea, dfnameb):
+        analysis_list = []
+        dfa = self.dfs[dfnamea]
+        dfb = self.dfs[dfnameb]
+        for i in self.params:
+            keys = copy(list(self.params))
+            keys.remove(i)
+            dfa1 = dfa.loc[dfa[i] <= self.intervals.loc['25%'][i], keys]
+            dfa2 = dfa.loc[(dfa[i] > self.intervals.loc['25%'][i]) & (dfa[i] < self.intervals.loc['75%'][i]), keys]
+            dfa3 = dfa.loc[dfa[i] >= self.intervals.loc['75%'][i], keys]
+            dfa1_mean = dfa1.mean(numeric_only=True)
+            dfa2_mean = dfa2.mean(numeric_only=True)
+            dfa3_mean = dfa3.mean(numeric_only=True)
+            dfb1 = dfb.loc[dfb[i] <= self.intervals.loc['25%'][i], keys]
+            dfb2 = dfb.loc[(dfb[i] > self.intervals.loc['25%'][i]) & (dfb[i] < self.intervals.loc['75%'][i]), keys]
+            dfb3 = dfb.loc[dfb[i] >= self.intervals.loc['75%'][i], keys]
+            dfb1_mean = dfb1.mean(numeric_only=True)
+            dfb2_mean = dfb2.mean(numeric_only=True)
+            dfb3_mean = dfb3.mean(numeric_only=True)
+            for j in keys:
+                analysis_list.append(result_dict(self.Type, dfnamea, i + '_low', j, 'mean', dfa1_mean.at[j]))
+                analysis_list.append(result_dict(self.Type, dfnamea, i + '_mid', j, 'mean', dfa2_mean.at[j]))
+                analysis_list.append(result_dict(self.Type, dfnamea, i + '_high', j, 'mean', dfa3_mean.at[j]))
+                analysis_list.append(result_dict(self.Type, dfnameb, i + '_low', j, 'mean', dfb1_mean.at[j]))
+                analysis_list.append(result_dict(self.Type, dfnameb, i + '_mid', j, 'mean', dfb2_mean.at[j]))
+                analysis_list.append(result_dict(self.Type, dfnameb, i + '_high', j, 'mean', dfb3_mean.at[j]))
+            analysis_list.append(result_dict(self.Type, dfnamea, i + '_low', None, 'count', len(dfa1)))
+            analysis_list.append(result_dict(self.Type, dfnamea, i + '_mid', None, 'count', len(dfa2)))
+            analysis_list.append(result_dict(self.Type, dfnamea, i + '_high', None, 'count', len(dfa3)))
+            analysis_list.append(result_dict(self.Type, dfnameb, i + '_low', None, 'count', len(dfb1)))
+            analysis_list.append(result_dict(self.Type, dfnameb, i + '_mid', None, 'count', len(dfb2)))
+            analysis_list.append(result_dict(self.Type, dfnameb, i + '_high', None, 'count', len(dfb3)))
+        return pd.DataFrame(analysis_list)
+    
+    def compare(self, dfnamea, dfnameb):
+        results = []
+        dfa = self.dfs[dfnamea]
+        dfb = self.dfs[dfnameb]
+        for i in self.params:
+            sa = dfa[i]
+            sb = dfb[i]
+            test = scipy.stats.ttest_ind(sa, sb, equal_var=False)
+            ci = test.confidence_interval()
+            result = {
+                'Type': self.Type,
+                'a': dfnamea,
+                'b': dfnameb,
+                'Parameter': i,
+                'Stratify': None,
+                'a mean': sa.mean(),
+                'b mean': sb.mean(),
+                't': test.statistic,
+                'low t': ci[0],
+                'hi t': ci[1],
+                'p': test.pvalue}
+            results.append(result)
+        return pd.DataFrame(results)
+    
+    def twoway(self, dfnamea, dfnameb):
+        results = pd.DataFrame()
+        dfa = self.dfs[dfnamea]
+        dfb = self.dfs[dfnameb]
+        for i in self.params:
+            keys = copy(list(self.params))
+            keys.remove(i)
+            dfa1 = dfa.loc[dfa[i] <= self.intervals.loc['25%'][i], keys]
+            dfa2 = dfa.loc[(dfa[i] > self.intervals.loc['25%'][i]) & (dfa[i] < self.intervals.loc['75%'][i]), keys]
+            dfa3 = dfa.loc[dfa[i] >= self.intervals.loc['75%'][i], keys]
+            dfb1 = dfb.loc[dfb[i] <= self.intervals.loc['25%'][i], keys]
+            dfb2 = dfb.loc[(dfb[i] > self.intervals.loc['25%'][i]) & (dfb[i] < self.intervals.loc['75%'][i]), keys]
+            dfb3 = dfb.loc[dfb[i] >= self.intervals.loc['75%'][i], keys]
+            for j in keys:
+                data = []
+                for ii in range(len(dfa1)):
+                    data.append({
+                        'Value': dfa1[j].iloc[ii],
+                        'Group': dfnamea,
+                        'Stratify': i + '_low'})
+                for ii in range(len(dfa2)):
+                    data.append({
+                        'Value': dfa2[j].iloc[ii],
+                        'Group': dfnamea,
+                        'Stratify': i + '_mid'})
+                for ii in range(len(dfa3)):
+                    data.append({
+                        'Value': dfa3[j].iloc[ii],
+                        'Group': dfnamea,
+                        'Stratify': i + '_high'})
+                for ii in range(len(dfb1)):
+                    data.append({
+                        'Value': dfb1[j].iloc[ii],
+                        'Group': dfnameb,
+                        'Stratify': i + '_low'})
+                for ii in range(len(dfb2)):
+                    data.append({
+                        'Value': dfb2[j].iloc[ii],
+                        'Group': dfnameb,
+                        'Stratify': i + '_mid'})
+                for ii in range(len(dfb3)):
+                    data.append({
+                        'Value': dfb3[j].iloc[ii],
+                        'Group': dfnameb,
+                        'Stratify': i + '_high'})
+                data = pd.DataFrame(data)
+                if data.isnull().values.any():
+                    continue
+                model = ols('Value ~ C(Group) * C(Stratify)', data=data).fit()
+                anova_table = sm.stats.anova_lm(model, typ=2)
+                result = anova_table['PR(>F)'].T
+                result.pop('Residual')
+                result['a'] = dfnamea
+                result['b'] = dfnameb
+                result['Parameter'] = j
+                result['Stratify'] = i
+                results = pd.concat([results, pd.DataFrame(result).T])
+        return results
 
 def plot_data(ax, lst, startpos, endpos, c='c'):
     x = [i for i in range(startpos, endpos)]
@@ -337,7 +442,7 @@ videonames = []
 analyses = []
 analyses_df = pd.DataFrame()
 steps_all = pd.DataFrame()
-steps_comparisons_all = pd.DataFrame()
+comparisons_all = pd.DataFrame()
 rps_df = pd.DataFrame()
 first_video = True
 
@@ -504,15 +609,12 @@ for file in os.listdir('.'):
     
     if settings['plot_figure']:
         fig, ax = plt.subplots()
-        ax.plot([i * metadata['fps'] for i in accels.p_list])
+        #ax.plot([i * metadata['fps'] for i in accels.p_list])
         ax.plot(speeds.list, c='b')
         for datum in accels_data:
             x = [i for i in range(datum['startpos'], datum['endpos'] + 1)]
             y = [speeds.list[i] for i in range(datum['startpos'], datum['endpos'] + 1)]
             ax.plot(x, y, c='r')
-        x = [datum['maxslopepos'] for datum in accels_data]
-        y = [speeds.list[datum['maxslopepos']] for datum in accels_data]
-        ax.scatter(x, y, c='y', marker='o')
     
     # load midline points data
     spine_lens = [0 for i in range(l)]
@@ -533,13 +635,14 @@ for file in os.listdir('.'):
                 spines[i].insert(0, [float(s0_temp[i][0]), float(s0_temp[i][1])])
                 spine_lens[i] += 1
     directions = [0 for i in range(l)]
+    for i in range(l):
+        if settings['alternate_turn']:
+            directions[i] = cal_direction(spines[i][round(spine_lens[i] * 2 / 3)], spines[i][spine_lens[i] - 1])
+        else:
+            directions[i] = cal_direction(spines[i][spine_lens[i] - 2], spines[i][spine_lens[i] - 1])
     turns = [0 for i in range(l)]
-    with open(path + '/' + videoname + '_directions.csv', 'r') as f:
-        direction_temp = [[cell for cell in row] for row in csv.reader(f)]
-        direction_temp.pop(0)
-        for i in range(l):
-            directions[i] = float(direction_temp[i][0])
-            turns[i] = float(direction_temp[i][1])
+    for i in range(1, l):
+        turns[i] = cal_direction_change(directions[i - 1], directions[i])
     heads = [0 for i in range(l)]
     with open(path + '/' + videoname + '_sn+1s.csv', 'r') as f:
         temp = [[cell for cell in row] for row in csv.reader(f)]
@@ -608,9 +711,8 @@ for file in os.listdir('.'):
     directions_free = [0 for i in range(l)]
     directions_free[0] = directions[0]
     for i in range(1, l):
-        directions_free[i] = directions_free[i - 1] + turns[i] / metadata['fps']
+        directions_free[i] = directions_free[i - 1] + turns[i]
     directions_free = list_set(directions_free, start=0, end=l, window=3)
-    turns_original = list(turns)
     turns = [0 for i in range(l)]
     for i in range(1, l):
         turns[i] = directions_free.list[i] - directions_free.list[i - 1]
@@ -668,7 +770,7 @@ for file in os.listdir('.'):
                              settings['turn_cutoff'] / metadata['fps'],
                              turns_n_criteria_f, turns_n_criteria_b,
                              turns_n_criteria_peak)
-    '''
+    
     if settings['plot_figure']:
         fig, ax = plt.subplots()
         ax.plot(directions_free.list)
@@ -676,7 +778,7 @@ for file in os.listdir('.'):
             plot_data(ax, directions_free.list, datum['startpos'], datum['endpos'] + 1, 'b')
         for datum in turns_n_data:
             plot_data(ax, directions_free.list, datum['startpos'], datum['endpos'] + 1, 'r')
-    '''
+    
     turns_data = deepcopy(turns_p_data)
     turns_data.extend(deepcopy(turns_n_data))
     turns_data.sort(key=lambda a: a['startpos'])
@@ -742,6 +844,14 @@ for file in os.listdir('.'):
                               angles_n_criteria_peak)
     angles_n_data = remove_duplicates(angles_n_data)
     
+    if settings['plot_figure']:
+        fig, ax = plt.subplots()
+        ax.plot(angles.list)
+        for datum in angles_p_data:
+            plot_data(ax, angles.list, datum['startpos'], datum['endpos'] + 1, 'b')
+        for datum in angles_n_data:
+            plot_data(ax, angles.list, datum['startpos'], datum['endpos'] + 1, 'r')
+    
     angles_neutral = copy(angles.list)
     angles_neutral_count = l
     for peak in angles_p_data:
@@ -765,10 +875,11 @@ for file in os.listdir('.'):
         angle_change = end - start
         bend = {
             'angle change': abs(angle_change),
+            'angle start': abs(start),
             'angle end': abs(end),
             'dur': peak['length'] / metadata['fps'],
             'angular velocity': abs(angle_change) / peak['length'] * metadata['fps'],
-            'bend pos': bend_poss[peak['endpos']]}
+            'bend pos': max(bend_poss[peak['startpos']:(peak['endpos'] + 1)])}
         if angle_change > 0:
             bend.update({'laterality': 'left'})
             if start * 0.2 + end * 0.8 > angle_neutral:
@@ -815,7 +926,6 @@ for file in os.listdir('.'):
                         steps[len(steps) - 1].bends.append(angles_bends[j])
                         steps[len(steps) - 1].bends_peaks.append(angles_data[j])
     steps_count = len(steps)
-    steps.sort(key=lambda a: a.startpos)
     
     for i in range(steps_count):
         if steps[i].accel != None:
@@ -824,6 +934,7 @@ for file in os.listdir('.'):
         else:
             steps[i].startpos = steps[i].turns_peaks[0]['startpos']
             steps[i].coastpos = steps[i].turns_peaks[0]['endpos']
+    steps.sort(key=lambda a: a.startpos)
     for i in range(steps_count - 1):
         steps[i].endpos = steps[i + 1].startpos - 1
     steps[steps_count - 1].endpos = l - 1
@@ -856,9 +967,9 @@ for file in os.listdir('.'):
         
         step.properties.update({
             'current speed': cdist1s[step.startpos],
-            'step length': sum(cen_dists[step.startpos:(step.endpos + 1)]),
+            'step length': sum(cen_dists[(step.startpos + 1):(step.endpos + 1)]),
             'step dur': (step.endpos + 1 - step.startpos) / metadata['fps'],
-            'speed change': max(0, speeds.list[step.coastpos] - speeds.list[step.startpos])})
+            'speed change': speeds.list[step.coastpos] - speeds.list[step.startpos]})
         if step.accel != None:
             step.properties.update({
                 'speed change': step.accel['change'],
@@ -910,7 +1021,7 @@ for file in os.listdir('.'):
             
             step.properties.update({
                 'mode': 'HT',
-                'bend angle reached': step.bends[0]['angle end'],
+                'bend angle reached': max(step.bends[0]['angle start'], step.bends[0]['angle end']),
                 'bend laterality': step.bends[0]['laterality'],
                 'bend angle traveled': step.bends[0]['angle change'],
                 'bend dur': step.bends[0]['dur'],
@@ -934,7 +1045,7 @@ for file in os.listdir('.'):
             angles_traveled = [step.bends[i]['angle change'] for i in range(step.bends_count)]
             angular_velocitys = [bend['angular velocity'] for bend in step.bends]
             durs = [bend['dur'] for bend in step.bends]
-            bend_pos = [step.bends[i]['bend pos'] for i in range(step.bends_count - 1)]
+            bend_pos = [step.bends[i]['bend pos'] for i in range(step.bends_count)]
             
             angles_reached_sum = 0
             angle_max = 0
@@ -979,7 +1090,7 @@ for file in os.listdir('.'):
             if i == 3:
                 i = 0
             if step.accel != None:
-                plot_data(ax, speeds_scaled, step.startpos, step.endpos + 1, c)
+                plot_data(ax, speeds_scaled, step.startpos, step.coastpos + 1, c)
             for peak in step.turns_peaks:
                 plot_data(ax, turns.list, peak['startpos'], peak['endpos'] + 1, c)
             for peak in step.bends_peaks:
@@ -997,7 +1108,7 @@ for file in os.listdir('.'):
             else:
                 c = 'r'
             if step.accel != None:
-                plot_data(ax, speeds_scaled, step.startpos, step.endpos + 1, c)
+                plot_data(ax, speeds_scaled, step.startpos, step.coastpos + 1, c)
             for peak in step.turns_peaks:
                 plot_data(ax, turns.list, peak['startpos'], peak['endpos'] + 1, c)
             for peak in step.bends_peaks:
@@ -1012,29 +1123,24 @@ for file in os.listdir('.'):
     angles_df = pd.DataFrame(angles_bends)
     angles_methods = {'angle change': methods,
                       'dur': methods,
+                      'bend pos': methods2,
                       'angular velocity': methods2}
-    angles_dict = {'Type': 'bend',
-                   'Classify': None}
-    angles_agg = agg(angles_df, angles_dict, angles_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(angles_agg)])
-    angles_dict['Classify'] = 'bend left'
-    angles_left_agg = agg(angles_df[angles_df['laterality'] == 'left'], angles_dict, angles_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(angles_left_agg)])
-    angles_dict['Classify'] = 'bend right'
-    angles_right_agg = agg(angles_df[angles_df['laterality'] == 'right'], angles_dict, angles_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(angles_right_agg)])
+    angles_DF = DF(angles_df, 'bend', angles_methods.keys())
+    angles_DF.dfs.update({
+        'bend left': angles_df[angles_df['laterality'] == 'left'],
+        'bend right': angles_df[angles_df['laterality'] == 'right']})
+    analysis_df = pd.concat([analysis_df, angles_DF.agg(angles_methods)])
+    analysis_df = pd.concat([analysis_df, angles_DF.agg(angles_methods, 'bend left')])
+    analysis_df = pd.concat([analysis_df, angles_DF.agg(angles_methods, 'bend right')])
     
     recoils_df = angles_df[angles_df['recoil'] == True]
-    recoils_dict = {'Type': 'recoil',
-                    'Classify': None}
-    recoils_agg = agg(recoils_df, recoils_dict, angles_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(recoils_agg)])
-    recoils_dict['Classify'] = 'bend left'
-    recoils_left_agg = agg(recoils_df[recoils_df['laterality'] == 'left'], recoils_dict, angles_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(recoils_left_agg)])
-    recoils_dict['Classify'] = 'bend right'
-    recoils_right_agg = agg(recoils_df[recoils_df['laterality'] == 'right'], recoils_dict, angles_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(recoils_right_agg)])
+    recoils_DF = DF(recoils_df, 'recoil', angles_methods.keys())
+    recoils_DF.dfs.update({
+        'bend left': recoils_df[recoils_df['laterality'] == 'left'],
+        'bend right': recoils_df[recoils_df['laterality'] == 'right']})
+    analysis_df = pd.concat([analysis_df, recoils_DF.agg(angles_methods)])
+    analysis_df = pd.concat([analysis_df, recoils_DF.agg(angles_methods, 'bend left')])
+    analysis_df = pd.concat([analysis_df, recoils_DF.agg(angles_methods, 'bend right')])
     
     steps_df = pd.DataFrame([step.properties for step in steps])
     steps_df = steps_df[steps_df['mode'] != 'UK']
@@ -1043,6 +1149,7 @@ for file in os.listdir('.'):
         'speed change': methods2,
         'velocity change': methods2,
         'accel': methods2,
+        'current speed': methods2,
         'step dur': methods,
         'turn angle': methods,
         'turn dur': methods,
@@ -1052,70 +1159,61 @@ for file in os.listdir('.'):
         'bend angular velocity': methods2,
         'bend dur': methods2,
         'bend pos': methods2}
-    steps_dict = {'Type': 'step',
-                  'Classify': None}
-    steps_agg = agg(steps_df, steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_agg)])
-    steps_dict['Classify'] = 'HT'
-    steps_ht_agg = agg(steps_df[steps_df['mode'] == 'HT'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_ht_agg)])
-    steps_dict['Classify'] = 'MT'
-    steps_mt_agg = agg(steps_df[steps_df['mode'] == 'MT'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_mt_agg)])
-    steps_dict['Classify'] = 'turn left'
-    steps_turn_left_agg = agg(steps_df[steps_df['turn laterality'] == 'left'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_turn_left_agg)])
-    steps_dict['Classify'] = 'turn right'
-    steps_turn_right_agg = agg(steps_df[steps_df['turn laterality'] == 'right'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_turn_right_agg)])
-    steps_dict['Classify'] = 'with turn'
-    steps_turn_agg = agg(steps_df[steps_df['turn laterality'] != 'neutral'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_turn_agg)])
-    steps_dict['Classify'] = 'without turn'
-    steps_turn_no_agg = agg(steps_df[steps_df['turn laterality'] == 'neutral'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_turn_no_agg)])
-    steps_dict['Classify'] = 'bend left'
-    steps_bend_left_agg = agg(steps_df[steps_df['bend laterality'] == 'left'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_bend_left_agg)])
-    steps_dict['Classify'] = 'bend right'
-    steps_bend_right_agg = agg(steps_df[steps_df['bend laterality'] == 'right'], steps_dict, steps_methods)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(steps_bend_right_agg)])
+    steps_DF = DF(steps_df, 'step', steps_methods.keys())
+    steps_DF.dfs.update({
+        'HT': steps_df[steps_df['mode'] == 'HT'],
+        'MT': steps_df[steps_df['mode'] == 'MT'],
+        'turn left': steps_df[steps_df['turn laterality'] == 'left'],
+        'turn right': steps_df[steps_df['turn laterality'] == 'right'],
+        'with turn': steps_df[steps_df['turn laterality'] != 'neutral'],
+        'without turn': steps_df[steps_df['turn laterality'] == 'neutral'],
+        'bend left': steps_df[steps_df['bend laterality'] == 'left'],
+        'bend right': steps_df[steps_df['bend laterality'] == 'right']})
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods)])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'HT')])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'MT')])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'turn left')])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'turn right')])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'with turn')])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'without turn')])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'bend left')])
+    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'bend right')])
     
-    steps_dict['Classify'] = 'None'
-    stratification = stratify(steps_df, steps_dict)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(stratification)])
-    steps_dict['Classify'] = 'turn left'
-    stratification_turn_left = stratify(steps_df[steps_df['turn laterality'] == 'left'], steps_dict)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(stratification_turn_left)])
-    steps_dict['Classify'] = 'turn right'
-    stratification_turn_right = stratify(steps_df[steps_df['turn laterality'] == 'right'], steps_dict)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(stratification_turn_right)])
-    steps_dict['Classify'] = 'with turn'
-    stratification_turn = stratify(steps_df[steps_df['turn laterality'] != 'neutral'], steps_dict)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(stratification_turn)])
-    steps_dict['Classify'] = 'without turn'
-    stratification_turn_no = stratify(steps_df[steps_df['turn laterality'] == 'neutral'], steps_dict)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(stratification_turn_no)])
-    steps_dict['Classify'] = 'bend left'
-    stratification_bend_left = stratify(steps_df[steps_df['bend laterality'] == 'left'], steps_dict)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(stratification_bend_left)])
-    steps_dict['Classify'] = 'bend right'
-    stratification_bend_right = stratify(steps_df[steps_df['bend laterality'] == 'right'], steps_dict)
-    analysis_df = pd.concat([analysis_df, pd.DataFrame(stratification_bend_right)])
+    analysis_df = pd.concat([analysis_df, steps_DF.stratify()])
+    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('HT', 'MT')])
+    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('turn left', 'turn right')])
+    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('with turn', 'without turn')])
+    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('bend left', 'bend right')])
+    
+    comparisons = pd.DataFrame()
+    comparisons = pd.concat([comparisons, angles_DF.compare('bend left', 'bend right')])
+    comparisons = pd.concat([comparisons, steps_DF.compare('HT', 'MT')])
+    comparisons = pd.concat([comparisons, steps_DF.compare('turn left', 'turn right')])
+    comparisons = pd.concat([comparisons, steps_DF.compare('with turn', 'without turn')])
+    comparisons = pd.concat([comparisons, steps_DF.compare('bend left', 'bend right')])
+    comparisons = pd.concat([comparisons, steps_DF.twoway('HT', 'MT')])
+    comparisons = pd.concat([comparisons, steps_DF.twoway('turn left', 'turn right')])
+    comparisons = pd.concat([comparisons, steps_DF.twoway('with turn', 'without turn')])
+    comparisons = pd.concat([comparisons, steps_DF.twoway('bend left', 'bend right')])
     
     turns_df.to_csv(path + '/' + videoname + '_turns_df.csv', index=False)
     angles_df.to_csv(path + '/' + videoname + '_angles_df.csv', index=False)
     steps_df.to_csv(path + '/' + videoname + '_steps_df.csv', index=False)
+    comparisons.to_csv(path + '/' + videoname + '_comparisons.csv')
     
     steps_df['video'] = videoname
     steps_all = pd.concat([steps_all, steps_df])
+    comparisons['video'] = videoname
+    comparisons_all = pd.concat([comparisons_all, comparisons])
     
     rp = []
     for i in steps_df.columns:
         for j in steps_df.columns:
             if i == j:
                 continue
+            si = steps_df[i]
             if steps_df[i].dtypes != 'O' and steps_df[j].dtypes != 'O':
+                sj = steps_df[j]
                 result = scipy.stats.linregress(steps_df[i], steps_df[j])
                 ci = scipy.stats.pearsonr(steps_df[i], steps_df[j]).confidence_interval()
                 rp.append({
@@ -1165,6 +1263,7 @@ for videoname in videonames:
 analyses_df_adjusted.to_csv('analyses_df_adjusted.csv', index=False)
 print('All analyses complete.')
 
+comparisons_all.to_csv('comparisons_all.csv')
 rps_df = rps_df.sort_values(by=['x', 'y'])
 rps_df.to_csv('rps.csv', index=False)
 
