@@ -1,0 +1,240 @@
+          Mixed Linear Model Regression Results
+=========================================================
+Model:            MixedLM Dependent Variable: step_length
+No. Observations: 2343    Method:             REML       
+No. Groups:       13      Scale:              0.0034     
+Min. group size:  117     Log-Likelihood:     3310.3002  
+Max. group size:  266     Converged:          Yes        
+Mean group size:  180.2                                  
+---------------------------------------------------------
+               Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+---------------------------------------------------------
+Intercept       0.148    0.021  6.965 0.000  0.106  0.190
+Group[T.veh]   -0.060    0.031 -1.927 0.054 -0.121  0.001
+Group Var       0.003    0.023                           
+=========================================================
+          Mixed Linear Model Regression Results
+==========================================================
+Model:            MixedLM Dependent Variable: speed_change
+No. Observations: 2343    Method:             REML        
+No. Groups:       13      Scale:              0.0152      
+Min. group size:  117     Log-Likelihood:     1543.7009   
+Max. group size:  266     Converged:          Yes         
+Mean group size:  180.2                                   
+----------------------------------------------------------
+                Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+----------------------------------------------------------
+Intercept        0.233    0.032  7.383 0.000  0.171  0.295
+Group[T.veh]    -0.076    0.046 -1.630 0.103 -0.167  0.015
+Group Var        0.007    0.024                           
+==========================================================
+            Mixed Linear Model Regression Results
+=============================================================
+Model:            MixedLM Dependent Variable: velocity_change
+No. Observations: 2343    Method:             REML           
+No. Groups:       13      Scale:              0.0237         
+Min. group size:  117     Log-Likelihood:     1024.5695      
+Max. group size:  266     Converged:          Yes            
+Mean group size:  180.2                                      
+--------------------------------------------------------------
+               Coef.   Std.Err.    z     P>|z|  [0.025  0.975]
+--------------------------------------------------------------
+Intercept       0.326     0.054   6.088  0.000   0.221   0.431
+Group[T.veh]   -0.099     0.079  -1.259  0.208  -0.254   0.055
+Group Var       0.020     0.056                               
+=============================================================
+         Mixed Linear Model Regression Results
+========================================================
+Model:            MixedLM Dependent Variable: accel     
+No. Observations: 2343    Method:             REML      
+No. Groups:       13      Scale:              6.5143    
+Min. group size:  117     Log-Likelihood:     -5544.6177
+Max. group size:  266     Converged:          Yes       
+Mean group size:  180.2                                 
+--------------------------------------------------------
+              Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+--------------------------------------------------------
+Intercept      4.746    0.558  8.504 0.000  3.652  5.840
+Group[T.veh]  -1.473    0.821 -1.795 0.073 -3.082  0.135
+Group Var      2.138    0.365                           
+========================================================
+         Mixed Linear Model Regression Results
+=======================================================
+Model:            MixedLM Dependent Variable: step_dur 
+No. Observations: 2343    Method:             REML     
+No. Groups:       13      Scale:              0.0217   
+Min. group size:  117     Log-Likelihood:     1129.9151
+Max. group size:  266     Converged:          Yes      
+Mean group size:  180.2                                
+-------------------------------------------------------
+             Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+-------------------------------------------------------
+Intercept     0.393    0.034 11.558 0.000  0.327  0.460
+Group[T.veh] -0.080    0.050 -1.595 0.111 -0.178  0.018
+Group Var     0.008    0.023                           
+=======================================================
+         Mixed Linear Model Regression Results
+=======================================================
+Model:            MixedLM Dependent Variable: coast_dur
+No. Observations: 2343    Method:             REML     
+No. Groups:       13      Scale:              0.0195   
+Min. group size:  117     Log-Likelihood:     1254.9153
+Max. group size:  266     Converged:          Yes      
+Mean group size:  180.2                                
+-------------------------------------------------------
+             Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+-------------------------------------------------------
+Intercept     0.298    0.030  9.823 0.000  0.239  0.358
+Group[T.veh] -0.074    0.045 -1.668 0.095 -0.162  0.013
+Group Var     0.006    0.020                           
+=======================================================
+           Mixed Linear Model Regression Results
+===========================================================
+Model:            MixedLM Dependent Variable: coast_percent
+No. Observations: 2343    Method:             REML         
+No. Groups:       13      Scale:              255.5187     
+Min. group size:  117     Log-Likelihood:     -9835.8900   
+Max. group size:  266     Converged:          Yes          
+Mean group size:  180.2                                    
+-----------------------------------------------------------
+                Coef.  Std.Err.   z    P>|z|  [0.025 0.975]
+-----------------------------------------------------------
+Intercept       70.798    2.515 28.150 0.000  65.869 75.728
+Group[T.veh]    -5.425    3.694 -1.469 0.142 -12.666  1.815
+Group Var       42.592    2.009                            
+===========================================================
+         Mixed Linear Model Regression Results
+========================================================
+Model:            MixedLM Dependent Variable: turn_angle
+No. Observations: 2343    Method:             REML      
+No. Groups:       13      Scale:              0.3421    
+Min. group size:  117     Log-Likelihood:     -2088.3333
+Max. group size:  266     Converged:          Yes       
+Mean group size:  180.2                                 
+--------------------------------------------------------
+              Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+--------------------------------------------------------
+Intercept      0.579    0.067  8.655 0.000  0.448  0.711
+Group[T.veh]  -0.023    0.098 -0.231 0.817 -0.215  0.170
+Group Var      0.029    0.023                           
+========================================================
+         Mixed Linear Model Regression Results
+=======================================================
+Model:            MixedLM Dependent Variable: turn_dur 
+No. Observations: 2343    Method:             REML     
+No. Groups:       13      Scale:              0.0009   
+Min. group size:  117     Log-Likelihood:     4849.1582
+Max. group size:  266     Converged:          Yes      
+Mean group size:  180.2                                
+-------------------------------------------------------
+             Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+-------------------------------------------------------
+Intercept     0.055    0.003 16.501 0.000  0.049  0.062
+Group[T.veh] -0.003    0.005 -0.547 0.584 -0.012  0.007
+Group Var     0.000    0.001                           
+=======================================================
+               Mixed Linear Model Regression Results
+===================================================================
+Model:            MixedLM Dependent Variable: turn_angular_velocity
+No. Observations: 2343    Method:             REML                 
+No. Groups:       13      Scale:              200.6389             
+Min. group size:  117     Log-Likelihood:     -9549.1635           
+Max. group size:  266     Converged:          Yes                  
+Mean group size:  180.2                                            
+---------------------------------------------------------------------
+                 Coef.    Std.Err.     z      P>|z|   [0.025   0.975]
+---------------------------------------------------------------------
+Intercept        15.026      1.593    9.433   0.000   11.904   18.148
+Group[T.veh]     -0.876      2.335   -0.375   0.708   -5.452    3.701
+Group Var        16.442      0.536                                   
+===================================================================
+                Mixed Linear Model Regression Results
+=====================================================================
+Model:               MixedLM  Dependent Variable:  bend_angle_reached
+No. Observations:    2343     Method:              REML              
+No. Groups:          13       Scale:               1.3526            
+Min. group size:     117      Log-Likelihood:      inf               
+Max. group size:     266      Converged:           Yes               
+Mean group size:     180.2                                           
+---------------------------------------------------------------------
+             Coef.    Std.Err.    z    P>|z|    [0.025       0.975]  
+---------------------------------------------------------------------
+Intercept    -0.039 1014713.088 -0.000 1.000 -1988801.146 1988801.068
+Group[T.veh]  0.089                                                  
+Group Var     0.000                                                  
+=====================================================================
+         Mixed Linear Model Regression Results
+=======================================================
+Model:            MixedLM Dependent Variable: bend_pos 
+No. Observations: 2343    Method:             REML     
+No. Groups:       13      Scale:              0.0015   
+Min. group size:  117     Log-Likelihood:     4300.6999
+Max. group size:  266     Converged:          Yes      
+Mean group size:  180.2                                
+-------------------------------------------------------
+             Coef.  Std.Err.   z    P>|z| [0.025 0.975]
+-------------------------------------------------------
+Intercept     0.088    0.004 21.240 0.000  0.080  0.096
+Group[T.veh] -0.023    0.006 -3.829 0.000 -0.035 -0.011
+Group Var     0.000    0.001                           
+=======================================================
+              Mixed Linear Model Regression Results
+=================================================================
+Model:            MixedLM Dependent Variable: bend_angle_traveled
+No. Observations: 2343    Method:             REML               
+No. Groups:       13      Scale:              0.8923             
+Min. group size:  117     Log-Likelihood:     -3216.5795         
+Max. group size:  266     Converged:          Yes                
+Mean group size:  180.2                                          
+-------------------------------------------------------------------
+               Coef.    Std.Err.     z      P>|z|   [0.025   0.975]
+-------------------------------------------------------------------
+Intercept       2.147      0.186   11.541   0.000    1.782    2.512
+Group[T.veh]   -0.105      0.273   -0.383   0.702   -0.641    0.431
+Group Var       0.236      0.109                                   
+=================================================================
+               Mixed Linear Model Regression Results
+===================================================================
+Model:            MixedLM Dependent Variable: bend_angular_velocity
+No. Observations: 2343    Method:             REML                 
+No. Groups:       13      Scale:              91.5613              
+Min. group size:  117     Log-Likelihood:     -8638.3646           
+Max. group size:  266     Converged:          Yes                  
+Mean group size:  180.2                                            
+---------------------------------------------------------------------
+                 Coef.    Std.Err.     z      P>|z|   [0.025   0.975]
+---------------------------------------------------------------------
+Intercept        25.955      2.114   12.278   0.000   21.812   30.098
+Group[T.veh]     -0.281      3.108   -0.091   0.928   -6.373    5.811
+Group Var        30.676      1.394                                   
+===================================================================
+           Mixed Linear Model Regression Results
+============================================================
+Model:            MixedLM Dependent Variable: bend_dur_total
+No. Observations: 2343    Method:             REML          
+No. Groups:       13      Scale:              0.0037        
+Min. group size:  117     Log-Likelihood:     3219.8912     
+Max. group size:  266     Converged:          Yes           
+Mean group size:  180.2                                     
+-------------------------------------------------------------
+              Coef.   Std.Err.    z     P>|z|  [0.025  0.975]
+-------------------------------------------------------------
+Intercept      0.174     0.007  25.278  0.000   0.160   0.187
+Group[T.veh]  -0.012     0.010  -1.232  0.218  -0.032   0.007
+Group Var      0.000     0.002                               
+============================================================
+              Mixed Linear Model Regression Results
+=================================================================
+Model:            MixedLM Dependent Variable: bend_wave_frequency
+No. Observations: 2343    Method:             REML               
+No. Groups:       13      Scale:              21.2161            
+Min. group size:  117     Log-Likelihood:     -6919.8182         
+Max. group size:  266     Converged:          Yes                
+Mean group size:  180.2                                          
+-------------------------------------------------------------------
+               Coef.    Std.Err.     z      P>|z|   [0.025   0.975]
+-------------------------------------------------------------------
+Intercept      12.824      0.540   23.730   0.000   11.765   13.883
+Group[T.veh]    1.131      0.792    1.427   0.154   -0.422    2.684
+Group Var       1.905      0.188                                   
+=================================================================
