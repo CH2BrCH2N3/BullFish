@@ -7,13 +7,10 @@ import scipy.stats
 import numpy as np
 from scipy.signal import find_peaks
 from copy import copy, deepcopy
-import statsmodels.api as sm
-from statsmodels.formula.api import ols
 from BullFish_pkg.math import pyth, cal_direction, cal_direction_change
 from BullFish_pkg.general import create_path, csvtodict, load_settings
 
 default_settings = {
-    'save_individually': 0,
     "tank_x": 210,
     "tank_y": 144,
     "plot_figure": 0,
@@ -21,28 +18,23 @@ default_settings = {
     "speed_limit": 2000,
     "accel_cutoff": 100,
     "min_accel_dur": 0.02,
-    "min_max_accel": 0,
+    "min_max_accel": 100,
     "min_speed_change": 0,
     "spine_analysis": 1,
     'alternate_turn': 0,
     "turn_cutoff": 2,
     "min_turn_dur": 0.02,
-    "min_max_turn_velocity": 0,
-    "min_turn_angle": 0.052,
+    "min_max_turn_velocity": 2,
+    "min_turn_angle": 0.1,
     "bend_cutoff": 2,
     "min_bend_dur": 0.02,
-    "min_bend_speed": 0,
-    "min_bend_angle": 0.035,
-    "amp_cutoff": 50,
-    "min_amp_dur": 0.02,
-    "min_amp_dt": 0,
+    "min_bend_speed": 2,
+    "min_bend_angle": 0.05,
     "min_amp": 2,
-    'min_step_turn': 0.052,
-    'front_window': 0.05,
-    'back_window': 0.05,
-    'use_s1': 0}
+    'use_s1': 1}
 
 settings = load_settings('analysis', default_settings)
+sampling = settings['sampling']
 
 def per_min(value):
     return value * 60 / total_time
@@ -77,162 +69,223 @@ def errors_correct(lst, errors):
             lst[start + i] = (lst[start - 1] * (length - i) + lst[end] * (i + 1)) / (length + 1)
     return lst
 
-class list_set:
-    def __init__(self, inputlist, start, end, window=0):
-        self.original_list = copy(inputlist)
-        self.list = copy(inputlist)
-        if window > 2:
-            for i in range(start, start + window // 2):
-                self.list[i] = sum(self.original_list[start:(i + window // 2 + 1)]) / (i + window // 2 - start + 1)
-            for i in range(start + window // 2 + 1, end - window // 2):
-                self.list[i] = sum(self.original_list[(i - window // 2):(i + window // 2 + 1)]) / window
-            for i in range(end - window // 2, end):
-                self.list[i] = sum(self.original_list[(i - window // 2):end]) / (end - i + window // 2)
-        self.p_list = [(item if item > 0 else 0) for item in self.list]
-        self.n_list = [(-item if item < 0 else 0) for item in self.list]
+class dfln: # dfln means deflection
+    def __init__(self):
+        self.startpos = 0
+        self.startval = 0
+        self.endpos = 0
+        self.endval = 0
+        self.centralpos = 0
+        self.length = 0
+        self.dur = 0
+        self.change = 0
+        self.meanslope = 0
+        self.maxslope = 0
+        self.maxslopepos = 0
+        self.belong = -1
+        self.dict = {}
+        self.env = {}
 
-# identify local maxima in list1 to characterize peaks in list2
-def get_peaks(list1, list2, prominence, criteria_f, criteria_b, criteria_peak):
-    peaks, _ = find_peaks(list1, prominence=prominence)
-    peaks = [int(peak) for peak in peaks]
-    data = []
-    l = len(list2)
-    for peak in peaks:
-        datum = {
-            'start': 0,
-            'startpos': 0,
-            'length': 0,
-            'end': 0,
-            'endpos': 0,
-            'peakpos': 0,
-            'uplength': 0,
-            'upheight': 0,
-            'height': 0,
-            'change': 0,
-            'auc': 0,
-            'meanslope': 0,
-            'maxslope': 0,
-            'maxslopepos': 0,
-            'belong': False}
-        j = peak
-        while j > 0:
-            slope = list2[j] - list2[j - 1]
-            if criteria_f(slope, list2[j]):
-                break
-            j -= 1
-        startpos = j
-        start = list2[startpos]
-        j = peak
-        while j < l - 1:
-            slope = list2[j + 1] - list2[j]
-            if criteria_b(slope, list2[j]):
-                break
-            j += 1
-        endpos = j
-        end = list2[endpos]
-        length = endpos - startpos
-        if list1 == list2:
-            peakpos = peak
-            uplength = peakpos - startpos
-            height = list2[peakpos]
-            upheight = height - list2[startpos]
-            change = list2[endpos] - list2[startpos]
-            auc = sum(list2[j] for j in range(startpos, endpos + 1))
-            meanslope = upheight / length if length > 0 else 0
-            maxslope = 0
-            maxslopepos = 0
-            for j in range(startpos + 1, peakpos + 1):
-                slope = list2[j] - list2[j - 1]
-                if maxslope < slope:
-                    maxslope = slope
-                    maxslopepos = j
-            datum['peakpos'] = peakpos
-            datum['uplength'] = uplength
-            datum['upheight'] = upheight
-            datum['auc'] = auc
-        else:
-            height = list2[endpos]
-            change = height - list2[startpos]
-            meanslope = change / length if length > 0 else 0
-            maxslope = 0
-            maxslopepos = 0
-            for j in range(startpos + 1, endpos + 1):
-                slope = abs(list2[j] - list2[j - 1])
-                if maxslope < slope:
-                    maxslope = slope
-                    maxslopepos = j
-        datum['start'] = start
-        datum['startpos'] = startpos
-        datum['length'] = length
-        datum['end'] = end
-        datum['endpos'] = endpos
-        datum['height'] = height
-        datum['change'] = change
-        datum['meanslope'] = meanslope
-        datum['maxslope'] = maxslope
-        datum['maxslopepos'] = maxslopepos
-        if criteria_peak(datum):
-            data.append(datum)
-    return data
-                
 def remove_duplicates(lst):
     dct = {}
     for item in lst:
-        dct.update({str(item['startpos']): item})
+        dct.update({str(item.startpos): item})
     nlst = []
     for key in dct.keys():
         nlst.append(dct[key])
     return nlst
 
-class step_datum:
+def plot_data(ax, lst, startpos, endpos, c='c'):
+    x = [i for i in range(startpos, endpos)]
+    y = [lst[i] for i in range(startpos, endpos)]
+    ax.plot(x, y, c)
+
+class curve:
+    
+    def __init__(self, inputlist, start, end, window=0):
+        
+        self.original = copy(inputlist)
+        self.l = len(inputlist)
+        self.start = start
+        self.window = window
+        
+        self.list = copy(inputlist)
+        if window > 2:
+            for i in range(start, start + window // 2):
+                self.list[i] = sum(self.original[start:(i + window // 2 + 1)]) / (i + window // 2 - start + 1)
+            for i in range(start + window // 2 + 1, end - window // 2):
+                self.list[i] = sum(self.original[(i - window // 2):(i + window // 2 + 1)]) / window
+            for i in range(end - window // 2, end):
+                self.list[i] = sum(self.original[(i - window // 2):end]) / (end - i + window // 2)
+        self.p = [(item if item > 0 else 0) for item in self.list]
+        self.n = [(-item if item < 0 else 0) for item in self.list]
+        
+        self.p_dflns = []
+        self.n_dflns = []
+        
+    def dt(self, fps):
+        
+        self.fps = fps
+        self.dt_original = [0 for i in range(self.l)]
+        for i in range(self.start + 1, self.l):
+            self.dt_original[i] = (self.list[i] - self.list[i - 1]) * fps
+        self.dt_curve = curve(self.dt_original, self.start + 1, self.l, self.window)
+        self.pdt = self.dt_curve.p
+        self.ndt = self.dt_curve.n
+        
+    def get_p_dflns(self, prominence, front, back, dur=0, maxslope=0, change=0):
+        
+        self.p_peaks, _ = find_peaks(self.pdt, prominence=prominence)
+        self.p_peaks = [int(peak) for peak in self.p_peaks]
+        
+        for peak in self.p_peaks:
+            d = dfln()
+            j = peak
+            while j > 0:
+                slope = (self.list[j] - self.list[j - 1]) * self.fps
+                if slope < front:
+                    break
+                j -= 1
+            d.startpos = j
+            d.startval = self.list[j]
+            j = peak
+            while j < self.l - 1:
+                slope = (self.list[j + 1] - self.list[j]) * self.fps
+                if slope < back:
+                    break
+                j += 1
+            d.endpos = j
+            d.endval = self.list[j]
+            d.centralpos = (d.startpos + d.endpos) / 2
+            d.length = d.endpos - d.startpos
+            d.dur = d.length / self.fps
+            d.change = d.endval - d.startval
+            d.meanslope = d.change / d.dur if d.length > 0 else 0
+            d.maxslope = 0
+            d.maxslopepos = 0
+            for j in range(d.startpos + 1, d.endpos + 1):
+                slope = abs(self.list[j] - self.list[j - 1]) * self.fps
+                if d.maxslope < slope:
+                    d.maxslope = slope
+                    d.maxslopepos = j
+            if d.startpos > 0 and d.dur > dur and d.maxslope > maxslope and d.change > change:
+                self.p_dflns.append(d)
+        
+        self.p_dflns = remove_duplicates(self.p_dflns)
+        self.p_dflns_count = len(self.p_dflns)
+    
+    def get_n_dflns(self, prominence, front, back, dur=0, maxslope=0, change=0):
+        
+        self.n_peaks, _ = find_peaks(self.ndt, prominence=prominence)
+        self.n_peaks = [int(peak) for peak in self.n_peaks]
+        
+        for peak in self.n_peaks:
+            d = dfln()
+            j = peak
+            while j > 0:
+                slope = (self.list[j] - self.list[j - 1]) * self.fps
+                if slope > front:
+                    break
+                j -= 1
+            d.startpos = j
+            d.startval = self.list[j]
+            j = peak
+            while j < self.l - 1:
+                slope = (self.list[j + 1] - self.list[j]) * self.fps
+                if slope > back:
+                    break
+                j += 1
+            d.endpos = j
+            d.endval = self.list[j]
+            d.centralpos = (d.startpos + d.endpos) / 2
+            d.length = d.endpos - d.startpos
+            d.dur = d.length / self.fps
+            d.change = d.endval - d.startval
+            d.meanslope = d.change / d.dur if d.length > 0 else 0
+            d.maxslope = 0
+            d.maxslopepos = 0
+            for j in range(d.startpos + 1, d.endpos + 1):
+                slope = abs(self.list[j] - self.list[j - 1]) * self.fps
+                if d.maxslope < slope:
+                    d.maxslope = slope
+                    d.maxslopepos = j
+            if d.startpos > 0 and d.dur > dur and abs(d.maxslope) > maxslope and abs(d.change) > change:
+                self.n_dflns.append(d)
+        
+        self.n_dflns = remove_duplicates(self.n_dflns)
+        self.n_dflns_count = len(self.n_dflns)
+    
+    def merge_dflns(self):
+        
+        self.dflns = deepcopy(self.p_dflns)
+        self.dflns.extend(deepcopy(self.n_dflns))
+        self.dflns.sort(key=lambda a: a.startpos)
+        self.dflns_count = len(self.dflns)
+    
+    def graph_dflns(self):
+        
+        fig, ax = plt.subplots()
+        ax.plot(self.list, 'y')
+        for d in self.p_dflns:
+            plot_data(ax, self.list, d.startpos, d.endpos + 1, 'b')
+        for d in self.n_dflns:
+            plot_data(ax, self.list, d.startpos, d.endpos + 1, 'r')
+    
+    def get_freq_envs(self, other_dflns, name):
+         # the env 'speed' is not included in this function
+        for i in range(self.dflns_count):
+            start = max(0, round(self.dflns[i].centralpos - self.fps / 2))
+            end = min(round(self.dflns[i].centralpos + self.fps / 2), l - 1)
+            r = end - start
+            count = 0
+            for d in other_dflns.dflns:
+                if d.centralpos >= start and d.centralpos <= end:
+                    count += 1
+            self.dflns[i].env.update({
+                name + ' frequency': count / r})
+   
+class step:
     def __init__(self):
         self.startpos = 0
         self.coastpos = 0
+        self.centralpos = 0
         self.endpos = 0
         self.accel = None
         self.turns = []
-        self.turns_peaks = []
         self.bends = []
-        self.bends_peaks = []
         self.properties = {
-            'current speed': 0,
-            'step length': 0,
-            'speed change': 0,
-            'velocity change': 0,
+            'current_speed': 0,
+            'step_length': 0,
+            'speed_change': 0,
+            'velocity_change': 0,
             'accel': 0,
-            'step dur': 0,
-            'coast dur': 0,
-            'coast percent': 100,
+            'step_dur': 0,
+            'coast_dur': 0,
+            'coast_percent': 100,
             'current step per second': 0,
-            'turn angle': 0,
-            'turn laterality': 'neutral',
-            'turn dur': 0,
-            'turn angular velocity': 0,
+            'turn_angle': 0,
+            'turn_laterality': 'neutral',
+            'turn_dur': 0,
+            'turn_angular_velocity': 0,
             'current bend per second': 0,
-            'bend angle reached': 0,
-            'bend laterality': 'neutral',
-            'bend pos': 0,
-            'bend angle traveled': 0,
-            'bend angular velocity': 0,
-            'bend dur total': 0,
-            'bend wave frequency': 0,
+            'bend_angle_reached': 0,
+            'bend_laterality': 'neutral',
+            'bend_pos': 0,
+            'bend_angle_traveled': 0,
+            'bend_angular_velocity': 0,
+            'bend_dur_total': 0,
+            'bend_wave_frequency': 0,
             'bend count': 0,
             'max angle pos': 0}
 
-def p5(s):
-    return np.percentile(s, 5)
-def p95(s):
-    return np.percentile(s, 95)
-def ipr(s):
-    return p95(s) - p5(s)
 aggs = {
     'sum': np.sum,
     'mean': np.mean,
     'std': np.std,
     'median': np.median,
-    'p5': p5,
-    'p95': p95,
-    'ipr': ipr}
+    'p5': lambda a: np.percentile(a, 5),
+    'p95': lambda a: np.percentile(a, 95),
+    'ipr': lambda a: np.percentile(a, 95) - np.percentile(a, 5)}
 agg1 = ['sum', 'mean', 'std', 'median', 'p5', 'p95', 'ipr']
 agg2 = ['mean', 'std', 'median', 'p5', 'p95', 'ipr']
 agg3 = ['median', 'p5', 'p95', 'ipr']
@@ -250,7 +303,7 @@ class DF:
     def __init__(self, df, Type, params):
         self.df = df
         self.Type = Type
-        self.params = params
+        self.params = params # the dictionary of parameters that are dependent variables
         self.dfs = {}
         self.intervals = self.df.describe()
     
@@ -266,7 +319,33 @@ class DF:
         analysis_list.append(result_dict(self.Type, dfname, None, None, 'count', len(df)))
         return pd.DataFrame(analysis_list)
     
-    def stratify(self):
+    def stratify0(self, param, cutoff): # param is the independent variable
+        analysis_list = []
+        df = self.df
+        df0 = df[df[param] < cutoff]
+        df1 = df[df[param] >= cutoff]
+        for i in self.params:
+            if i == param:
+                continue
+            analysis_list.append(result_dict(self.Type, None, param + '_low', i, 'mean', df0[i].mean()))
+            analysis_list.append(result_dict(self.Type, None, param + '_high', i, 'mean', df1[i].mean()))
+        return pd.DataFrame(analysis_list)
+    
+    def stratify1(self, param): # param is the independent variable
+        analysis_list = []
+        df = self.df
+        df1 = df[df[param] <= self.intervals.loc['25%'][param]]
+        df2 = df[(df[param] > self.intervals.loc['25%'][param]) & (df[param] < self.intervals.loc['75%'][param])]
+        df3 = df[df[param] >= self.intervals.loc['75%'][param]]
+        for i in self.params:
+            if i == param:
+                continue
+            analysis_list.append(result_dict(self.Type, None, param + '_low', i, 'mean', df1[i].mean()))
+            analysis_list.append(result_dict(self.Type, None, param + '_mid', i, 'mean', df2[i].mean()))
+            analysis_list.append(result_dict(self.Type, None, param + '_high', i, 'mean', df3[i].mean()))
+        return pd.DataFrame(analysis_list)
+    '''
+    def stratify1(self):
         analysis_list = []
         df = self.df
         for i in self.params:
@@ -283,7 +362,7 @@ class DF:
                 analysis_list.append(result_dict(self.Type, None, i + '_mid', j, 'mean', df2_mean.at[j]))
                 analysis_list.append(result_dict(self.Type, None, i + '_high', j, 'mean', df3_mean.at[j]))
         return pd.DataFrame(analysis_list)
-    
+    '''
     def stratify2(self, dfnamea, dfnameb):
         analysis_list = []
         dfa = self.dfs[dfnamea]
@@ -317,94 +396,12 @@ class DF:
             analysis_list.append(result_dict(self.Type, dfnameb, i + '_mid', None, 'count', len(dfb2)))
             analysis_list.append(result_dict(self.Type, dfnameb, i + '_high', None, 'count', len(dfb3)))
         return pd.DataFrame(analysis_list)
-    
-    def compare(self, dfnamea, dfnameb):
-        results = []
-        dfa = self.dfs[dfnamea]
-        dfb = self.dfs[dfnameb]
-        for i in self.params:
-            sa = dfa[i]
-            sb = dfb[i]
-            test = scipy.stats.ttest_ind(sa, sb, equal_var=False)
-            ci = test.confidence_interval()
-            result = {
-                'Type': self.Type,
-                'a': dfnamea,
-                'b': dfnameb,
-                'Parameter': i,
-                'Stratify': None,
-                'a mean': sa.mean(),
-                'b mean': sb.mean(),
-                't': test.statistic,
-                'low t': ci[0],
-                'hi t': ci[1],
-                'p': test.pvalue}
-            results.append(result)
-        return pd.DataFrame(results)
-    
-    def twoway(self, dfnamea, dfnameb):
-        results = pd.DataFrame()
-        dfa = self.dfs[dfnamea]
-        dfb = self.dfs[dfnameb]
-        for i in self.params:
-            keys = copy(list(self.params))
-            keys.remove(i)
-            dfa1 = dfa.loc[dfa[i] <= self.intervals.loc['25%'][i], keys]
-            dfa2 = dfa.loc[(dfa[i] > self.intervals.loc['25%'][i]) & (dfa[i] < self.intervals.loc['75%'][i]), keys]
-            dfa3 = dfa.loc[dfa[i] >= self.intervals.loc['75%'][i], keys]
-            dfb1 = dfb.loc[dfb[i] <= self.intervals.loc['25%'][i], keys]
-            dfb2 = dfb.loc[(dfb[i] > self.intervals.loc['25%'][i]) & (dfb[i] < self.intervals.loc['75%'][i]), keys]
-            dfb3 = dfb.loc[dfb[i] >= self.intervals.loc['75%'][i], keys]
-            for j in keys:
-                data = []
-                for ii in range(len(dfa1)):
-                    data.append({
-                        'Value': dfa1[j].iloc[ii],
-                        'Group': dfnamea,
-                        'Stratify': i + '_low'})
-                for ii in range(len(dfa2)):
-                    data.append({
-                        'Value': dfa2[j].iloc[ii],
-                        'Group': dfnamea,
-                        'Stratify': i + '_mid'})
-                for ii in range(len(dfa3)):
-                    data.append({
-                        'Value': dfa3[j].iloc[ii],
-                        'Group': dfnamea,
-                        'Stratify': i + '_high'})
-                for ii in range(len(dfb1)):
-                    data.append({
-                        'Value': dfb1[j].iloc[ii],
-                        'Group': dfnameb,
-                        'Stratify': i + '_low'})
-                for ii in range(len(dfb2)):
-                    data.append({
-                        'Value': dfb2[j].iloc[ii],
-                        'Group': dfnameb,
-                        'Stratify': i + '_mid'})
-                for ii in range(len(dfb3)):
-                    data.append({
-                        'Value': dfb3[j].iloc[ii],
-                        'Group': dfnameb,
-                        'Stratify': i + '_high'})
-                data = pd.DataFrame(data)
-                if data.isnull().values.any():
-                    continue
-                model = ols('Value ~ C(Group) * C(Stratify)', data=data).fit()
-                anova_table = sm.stats.anova_lm(model, typ=2)
-                result = anova_table['PR(>F)'].T
-                result.pop('Residual')
-                result['a'] = dfnamea
-                result['b'] = dfnameb
-                result['Parameter'] = j
-                result['Stratify'] = i
-                results = pd.concat([results, pd.DataFrame(result).T])
-        return results
 
-def plot_data(ax, lst, startpos, endpos, c='c'):
-    x = [i for i in range(startpos, endpos)]
-    y = [lst[i] for i in range(startpos, endpos)]
-    ax.plot(x, y, c)
+class results_df:
+    def __init__(self, df):
+        self.df = df
+    def add(self, results):
+        self.df = pd.concat([self.df, results])
 
 def plot_scatter(ax, steps, key, lst, c='c', marker='o'):
     scatter_x = []
@@ -420,7 +417,6 @@ videonames = []
 analyses = []
 analyses_df = pd.DataFrame()
 steps_all = pd.DataFrame()
-comparisons_all = pd.DataFrame()
 rps_df = pd.DataFrame()
 first_video = True
 
@@ -450,6 +446,7 @@ for file in os.listdir('.'):
         ratio = settings['tank_x'] / metadata['swimarea_x']
     else:
         ratio = settings['tank_y'] / metadata['swimarea_y']
+    fps = metadata['fps']
     
     # load essential tracking data
     with open(path + '/' + videoname + '_cen.csv', 'r') as f:
@@ -461,15 +458,15 @@ for file in os.listdir('.'):
     # obtain a list of speed at each frame
     cen_dists = [0 for i in range(l)]
     speeds = [0 for i in range(l)]
-    for i in range(settings['sampling'], l, settings['sampling']):
-        cen_dists[i] = pyth(cen[i], cen[i - settings['sampling']]) / settings['sampling']
-        speeds[i] = cen_dists[i] * metadata['fps']
-    for i in range(0, settings['sampling']):
-        cen_dists[i] = cen_dists[settings['sampling']]
-    for i in range(settings['sampling'] * 2, l, settings['sampling']):
-        for j in range(i - settings['sampling'] + 1, i):
-            cen_dists[j] = (cen_dists[i - settings['sampling']] * (i - j) + cen_dists[i] * (j - (i - settings['sampling']))) / settings['sampling']
-            speeds[j] = cen_dists[j] * metadata['fps']
+    for i in range(sampling, l, sampling):
+        cen_dists[i] = pyth(cen[i], cen[i - sampling]) / sampling
+        speeds[i] = cen_dists[i] * fps
+    for i in range(0, sampling):
+        cen_dists[i] = cen_dists[sampling]
+    for i in range(sampling * 2, l, sampling):
+        for j in range(i - sampling + 1, i):
+            cen_dists[j] = (cen_dists[i - sampling] * (i - j) + cen_dists[i] * (j - (i - sampling))) / sampling
+            speeds[j] = cen_dists[j] * fps
     
     error1_frames = []
     for i in range(l):
@@ -480,24 +477,24 @@ for file in os.listdir('.'):
     
     # obtain total distance travelled and average speed
     total_distance = sum(cen_dists)
-    total_time = l / metadata['fps']
+    total_time = l / fps
     speed_avg = total_distance / total_time
     
     # determine whether the fish is freezing for each frame
     freeze = [0 for i in range(l)]
-    for i in range(int(metadata['fps'] * 3), l):
-        cdist1 = pyth(cen[int(i - metadata['fps'] * 2)], cen[int(i - metadata['fps'] * 3)])
-        cdist2 = pyth(cen[int(i - metadata['fps'])], cen[int(i - metadata['fps'] * 2)])
-        cdist3 = pyth(cen[i], cen[int(i - metadata['fps'])])
+    for i in range(int(fps * 3), l):
+        cdist1 = pyth(cen[int(i - fps * 2)], cen[int(i - fps * 3)])
+        cdist2 = pyth(cen[int(i - fps)], cen[int(i - fps * 2)])
+        cdist3 = pyth(cen[i], cen[int(i - fps)])
         if cdist1 < 1 and cdist2 < 1 and cdist3 < 1:
-            for j in range(int(i - metadata['fps'] * 3 + 1), i + 1):
+            for j in range(int(i - fps * 3 + 1), i + 1):
                 freeze[j] = 1
         elif cdist1 > 1 and cdist2 > 1 and cdist3 > 1:
-            for j in range(int(i - metadata['fps'] * 2 + 1), i + 1):
+            for j in range(int(i - fps * 2 + 1), i + 1):
                 freeze[j] = 0
     
     # obtain parameters related to freezing
-    total_freeze_time = sum(freeze) / metadata['fps']
+    total_freeze_time = sum(freeze) / fps
     freeze_percent = total_freeze_time / total_time * 100
     active_time = total_time - total_freeze_time
     active_speed = total_distance / active_time
@@ -508,15 +505,15 @@ for file in os.listdir('.'):
     freeze_freq = per_min(freeze_count)
     
     # obtain a list of speeds with running average and obtain max speed
-    speeds = list_set(speeds, start=1, end=l, window=5)
+    speeds = curve(speeds, start=1, end=l, window=5)
     max_speed = max(speeds.list)
     
     # obtain a list of speed measured over 1s
     cdist1s = [0 for i in range(l)]
     for i in range(1, l):
-        start = max(1, round(i + 1 - metadata['fps'] / 2))
-        end = min(l, round(i + 1 + metadata['fps'] / 2))
-        cdist1s[i] = sum([cen_dists[j] for j in range(start, end)]) * metadata['fps'] / (end - start)
+        start = max(1, round(i + 1 - fps / 2))
+        end = min(l, round(i + 1 + fps / 2))
+        cdist1s[i] = sum([cen_dists[j] for j in range(start, end)]) * fps / (end - start)
     cdist1s[0] = cdist1s[1]
     max_distance_1s = max(cdist1s)
     
@@ -535,7 +532,7 @@ for file in os.listdir('.'):
         ds_from_wall[i] = min(x, y)
         if ds_from_wall[i] < d_from_wall:
             thigmotaxis_time += 1
-    thigmotaxis_time /= metadata['fps']
+    thigmotaxis_time /= fps
     
     analysis = {
         'videoname': videoname,
@@ -550,42 +547,17 @@ for file in os.listdir('.'):
         'freeze_freq': freeze_freq,
         'thigmotaxis_time': thigmotaxis_time}
     
-    create_path('Tracks')
-    fig, ax = plt.subplots()
-    ax.scatter(x=[cen[i][0] for i in range(l)], y=[cen[i][1] for i in range(l)])
-    fig.savefig('Tracks/' + videoname + '_track.png')
+    if settings['plot_figure']:
+        create_path('Tracks')
+        fig, ax = plt.subplots()
+        ax.scatter(x=[cen[i][0] for i in range(l)], y=[cen[i][1] for i in range(l)])
+        fig.savefig('Tracks/' + videoname + '_track.png')
     
-    # obtain a list of acceleration over each frame, with running average
-    # the unit of acceleration here is mm/s/frame
-    accels = [0 for i in range(l)]
-    for i in range(1, l):
-        accels[i] = speeds.list[i] - speeds.list[i - 1]
-    accels[0] = accels[1]
-    accels = list_set(accels, start=1, end=l, window=5)
+    speeds.dt(fps)
+    speeds.get_p_dflns(settings['accel_cutoff'], -10, -20,
+                       settings['min_accel_dur'], settings['min_max_accel'], settings['min_speed_change'])
     
-    # get the peaks of acceleration
-    def accels_criteria_f(slope, lst):
-        if slope < -0.1:
-            return True
-        else:
-            return False
-    def accels_criteria_b(slope, lst):
-        if slope < -0.2:
-            return True
-        else:
-            return False
-    def accels_criteria_peak(datum):
-        if datum['length'] >= int(settings['min_accel_dur'] * metadata['fps']):
-            if datum['maxslope'] * metadata['fps'] >= settings['min_max_accel']:
-                if datum['change'] >= settings['min_speed_change']:
-                    return True
-        return False
-    accels_data = get_peaks(accels.p_list, speeds.list, settings['accel_cutoff'] / metadata['fps'],
-                            accels_criteria_f, accels_criteria_b, accels_criteria_peak)
-    accels_data = remove_duplicates(accels_data)
-    accels_count = len(accels_data)
-    
-    if accels_count == 0:
+    if speeds.p_dflns_count == 0:
         print('No detectable movement')
         if settings['save_individually']:
             with open(path + '/' + videoname + '_analysis.csv', 'w') as f:
@@ -598,26 +570,23 @@ for file in os.listdir('.'):
                 f.write(key + ', ' + str(settings[key]) + '\n')
         continue
     
+    for i in range(speeds.p_dflns_count):
+        speeds.p_dflns[i].dict.update({
+            'acceleration': speeds.p_dflns[i].maxslope,
+            'speed_change': speeds.p_dflns[i].change})
+        speeds.p_dflns[i].env.update({
+            'speed': cdist1s[round(speeds.p_dflns[i].centralpos)]})
+    
+    if settings['plot_figure']:
+        speeds.graph_dflns()
+    
     if not settings['spine_analysis']:
-        if settings['save_individually']:
-            with open(path + '/' + videoname + '_analysis.csv', 'w') as f:
-                for key in analysis:
-                    f.write(key + ', ' + str(analysis[key]) + '\n')
         analyses.append(analysis)
         print('Analysis of ' + videoname + ' complete.')
         with open(path + '/' + videoname + '_analysis_notes.csv', 'w') as f:
             for key in settings:
                 f.write(key + ', ' + str(settings[key]) + '\n')
-        continue
-    
-    if settings['plot_figure']:
-        fig, ax = plt.subplots()
-        #ax.plot([i * metadata['fps'] for i in accels.p_list])
-        ax.plot(speeds.list, c='b')
-        for datum in accels_data:
-            x = [i for i in range(datum['startpos'], datum['endpos'] + 1)]
-            y = [speeds.list[i] for i in range(datum['startpos'], datum['endpos'] + 1)]
-            ax.plot(x, y, c='r')
+        continue # step analysis when spine_analysis is disabled is not yet available
     
     # load midline points data
     spine_lens = [0 for i in range(l)]
@@ -628,14 +597,14 @@ for file in os.listdir('.'):
             spine_lens[i] = int(spines[i][0])
             spine_temp = []
             for j in range(1, spine_lens[i] + 1):
-                spine_temp.append([float(spines[i][j * 2 - 1]), float(spines[i][j * 2])])
+                spine_temp.append((float(spines[i][j * 2 - 1]) * ratio, float(spines[i][j * 2]) * ratio))
             spines[i] = spine_temp
     if not settings['use_s1']:
         with open(path + '/' + videoname + '_s0s.csv', 'r') as f:
             s0_temp = [[cell for cell in row] for row in csv.reader(f)]
             s0_temp.pop(0)
             for i in range(l):
-                spines[i].insert(0, [float(s0_temp[i][0]), float(s0_temp[i][1])])
+                spines[i].insert(0, (float(s0_temp[i][0]) * ratio, float(s0_temp[i][1]) * ratio))
                 spine_lens[i] += 1
     directions = [0 for i in range(l)]
     for i in range(l):
@@ -651,7 +620,7 @@ for file in os.listdir('.'):
         temp = [[cell for cell in row] for row in csv.reader(f)]
         temp.pop(0)
         for i in range(l):
-            heads[i] = [float(temp[i][0]), float(temp[i][1])]
+            heads[i] = (float(temp[i][0]) * ratio, float(temp[i][1]) * ratio)
     
     # calculate bend angles, amps
     spine_angles = [[] for i in range(l)]
@@ -673,12 +642,12 @@ for file in os.listdir('.'):
     for i in range(l):
         if spines[i][spine_lens[i] - 1][0] == spines[i][spine_lens[i] - 2][0]:
             for j in range(spine_lens[i] - 2):
-                trunk_amps[i][j] = abs(spines[i][j][0] - spines[i][spine_lens[i] - 1][0]) * ratio
+                trunk_amps[i][j] = abs(spines[i][j][0] - spines[i][spine_lens[i] - 1][0])
         else:
             m = (spines[i][spine_lens[i] - 1][1] - spines[i][spine_lens[i] - 2][1]) / (spines[i][spine_lens[i] - 1][0] - spines[i][spine_lens[i] - 2][0])
             c = spines[i][spine_lens[i] - 1][1] - m * spines[i][spine_lens[i] - 1][0]
             for j in range(spine_lens[i] - 2):
-                trunk_amps[i][j] = abs(m * spines[i][j][0] - spines[i][j][1] + c) / math.sqrt(m ** 2 + 1) * ratio
+                trunk_amps[i][j] = abs(m * spines[i][j][0] - spines[i][j][1] + c) / math.sqrt(m ** 2 + 1)
         if spine_lens[i] > 2:
             amps[i] = trunk_amps[i][0]
     
@@ -695,7 +664,7 @@ for file in os.listdir('.'):
                 if j >= 1:
                     bend_poss[i] = sum(fish_segs[i][0:j]) / fish_lengths[i]
                 break
-    bend_poss = list_set(bend_poss, 0, l, 3)
+    bend_poss = curve(bend_poss, 0, l, 3)
     
     fish_length_med = float(pd.DataFrame(fish_lengths).median().iloc[0])
     analysis.update({'fish_length': fish_length_med})
@@ -709,366 +678,354 @@ for file in os.listdir('.'):
     angles = errors_correct(angles, error_frames)
     amps = errors_correct(amps, error_frames)
     
-    # directions_free is a list of special running average of direction of locomotion
-    # turns is derived from directions_free. unit is rad/frame
-    # turning left is -, turning right is +
-    directions_free = [0 for i in range(l)]
-    directions_free[0] = directions[0]
+    fdirs = [0 for i in range(l)] # fdirs is a list of special running average of direction of locomotion
+    fdirs[0] = directions[0]
     for i in range(1, l):
-        directions_free[i] = directions_free[i - 1] + turns[i]
-    directions_free = list_set(directions_free, start=0, end=l, window=3)
-    turns = [0 for i in range(l)]
-    for i in range(1, l):
-        turns[i] = directions_free.list[i] - directions_free.list[i - 1]
-    turns = list_set(turns, start=1, end=l, window=3)
+        fdirs[i] = fdirs[i - 1] + turns[i]
     
-    total_left_turn = sum([(abs(turn) if turn < 0 else 0) for turn in turns.original_list])
-    total_right_turn = sum([(turn if turn > 0 else 0) for turn in turns.original_list])
-    total_turn = total_left_turn + total_right_turn
-    turn_preference = cal_preference(total_left_turn, total_right_turn)
-    meandering = total_turn / total_distance
-    analysis.update({
-        'total_turn': total_turn,
-        'total_left_turn': total_left_turn,
-        'total_right_turn': total_right_turn,
-        'turn_preference': turn_preference,
-        'meandering': meandering})
-    
-    def turns_p_criteria_f(slope, lst):
-        if slope < 0.02:
-            return True
-        else:
-            return False
-    def turns_p_criteria_b(slope, lst):
-        if slope < 0.02:
-            return True
-        else:
-            return False
-    def turns_p_criteria_peak(datum):
-        if datum['length'] >= int(settings['min_turn_dur'] * metadata['fps']):
-            if datum['maxslope'] * metadata['fps'] >= settings['min_max_turn_velocity']:
-                if datum['change'] >= settings['min_turn_angle']:
-                    return True
-        return False
-    turns_p_data = get_peaks(turns.p_list, directions_free.list,
-                             settings['turn_cutoff'] / metadata['fps'],
-                             turns_p_criteria_f, turns_p_criteria_b,
-                             turns_p_criteria_peak)
-    def turns_n_criteria_f(slope, lst):
-        if slope > -0.02:
-            return True
-        else:
-            return False
-    def turns_n_criteria_b(slope, lst):
-        if slope > -0.02:
-            return True
-        else:
-            return False
-    def turns_n_criteria_peak(datum):
-        if datum['length'] >= int(settings['min_turn_dur'] * metadata['fps']):
-            if abs(datum['maxslope']) * metadata['fps'] >= settings['min_max_turn_velocity']:
-                if abs(datum['change']) >= settings['min_turn_angle']:
-                    return True
-        return False
-    turns_n_data = get_peaks(turns.n_list, directions_free.list,
-                             settings['turn_cutoff'] / metadata['fps'],
-                             turns_n_criteria_f, turns_n_criteria_b,
-                             turns_n_criteria_peak)
-    
+    fdirs = curve(fdirs, start=0, end=l, window=3)
+    fdirs.dt(fps) # turning left is -, turning right is +
+    fdirs.get_p_dflns(settings['turn_cutoff'], 2, 2,
+                      settings['min_turn_dur'], settings['min_max_turn_velocity'], settings['min_turn_angle'])
+    fdirs.get_n_dflns(settings['turn_cutoff'], -2, -2,
+                      settings['min_turn_dur'], settings['min_max_turn_velocity'], settings['min_turn_angle'])
+    fdirs.merge_dflns()
     if settings['plot_figure']:
-        fig, ax = plt.subplots()
-        ax.plot(directions_free.list)
-        for datum in turns_p_data:
-            plot_data(ax, directions_free.list, datum['startpos'], datum['endpos'] + 1, 'b')
-        for datum in turns_n_data:
-            plot_data(ax, directions_free.list, datum['startpos'], datum['endpos'] + 1, 'r')
+        fdirs.graph_dflns()
     
-    turns_data = deepcopy(turns_p_data)
-    turns_data.extend(deepcopy(turns_n_data))
-    turns_data.sort(key=lambda a: a['startpos'])
-    turns_steps = []
-    for peak in turns_data:
-        turn = {
-            'angle': abs(peak['change']),
-            'dur': peak['length'] / metadata['fps'],
-            'angular velocity': abs(peak['meanslope']) / peak['length'] * metadata['fps']}
-        if peak['change'] > 0:
-            turn.update({'laterality': 'right'})
-        else:
-            turn.update({'laterality': 'left'})
-        turns_steps.append(turn)
+    for i in range(fdirs.dflns_count):
+        fdirs.dflns[i].dict.update({
+            'turn_angle': abs(fdirs.dflns[i].change),
+            'turn_angular_velocity': abs(fdirs.dflns[i].maxslope),
+            'turn_duration': fdirs.dflns[i].dur,
+            'turn_laterality': 'left' if fdirs.dflns[i].change < 0 else 'right'})
+        fdirs.dflns[i].env.update({'speed': cdist1s[round(fdirs.dflns[i].centralpos)]})
     
-    # unit is rad/frame. turning left is +, turning right is -
-    angles = list_set(angles, start=0, end=l, window=5)
-    angles_ddt = [0 for i in range(l)]
-    for i in range(1, l):
-        angles_ddt[i] = angles.list[i] - angles.list[i - 1]
-    angles_ddt = list_set(angles_ddt, start=1, end=l, window=5)
-    
-    def angles_p_criteria_f(slope, lst):
-        if slope < 0.02:
-            return True
-        else:
-            return False
-    def angles_p_criteria_b(slope, lst):
-        if slope < 0.02:
-            return True
-        else:
-            return False
-    def angles_p_criteria_peak(datum):
-        if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']):
-            if datum['maxslope'] * metadata['fps'] >= settings['min_bend_speed']:
-                if datum['change'] >= settings['min_bend_angle']:
-                    return True
-        return False
-    angles_p_data = get_peaks(angles_ddt.p_list, angles.list,
-                              settings['bend_cutoff'] / metadata['fps'],
-                              angles_p_criteria_f, angles_p_criteria_b,
-                              angles_p_criteria_peak)
-    angles_p_data = remove_duplicates(angles_p_data)
-    def angles_n_criteria_f(slope, lst):
-        if slope > -0.02:
-            return True
-        else:
-            return False
-    def angles_n_criteria_b(slope, lst):
-        if slope > -0.02:
-            return True
-        else:
-            return False
-    def angles_n_criteria_peak(datum):
-        if datum['length'] >= int(settings['min_bend_dur'] * metadata['fps']):
-            if abs(datum['maxslope']) * metadata['fps'] >= settings['min_bend_speed']:
-                if abs(datum['change']) >= settings['min_bend_angle']:
-                    return True
-        return False
-    angles_n_data = get_peaks(angles_ddt.n_list, angles.list,
-                              settings['bend_cutoff'] / metadata['fps'],
-                              angles_n_criteria_f, angles_n_criteria_b,
-                              angles_n_criteria_peak)
-    angles_n_data = remove_duplicates(angles_n_data)
-    
+    angles = curve(angles, start=0, end=l, window=5)
+    angles.dt(fps) # turning left is +, turning right is -
+    angles.get_p_dflns(settings['bend_cutoff'], 2, 2,
+                       settings['min_bend_dur'], settings['min_bend_speed'], settings['min_bend_angle'])
+    angles.get_n_dflns(settings['bend_cutoff'], -2, -2,
+                       settings['min_bend_dur'], settings['min_bend_speed'], settings['min_bend_angle'])
+    angles.merge_dflns()
     if settings['plot_figure']:
-        fig, ax = plt.subplots()
-        ax.plot(angles.list)
-        for datum in angles_p_data:
-            plot_data(ax, angles.list, datum['startpos'], datum['endpos'] + 1, 'b')
-        for datum in angles_n_data:
-            plot_data(ax, angles.list, datum['startpos'], datum['endpos'] + 1, 'r')
+        angles.graph_dflns()
     
     angles_neutral = copy(angles.list)
     angles_neutral_count = l
-    for peak in angles_p_data:
-        for i in range(peak['startpos'], peak['endpos'] + 1):
+    for d in angles.p_dflns:
+        for i in range(d.startpos, d.endpos + 1):
             angles_neutral[i] = 0
             angles_neutral_count -= 1
-    for peak in angles_n_data:
-        for i in range(peak['startpos'], peak['endpos'] + 1):
+    for d in angles.n_dflns:
+        for i in range(d.startpos, d.endpos + 1):
             angles_neutral[i] = 0
             angles_neutral_count -= 1
     angle_neutral = sum(angles_neutral) / angles_neutral_count
     analysis.update({'angle_neutral': angle_neutral})
     
-    angles_data = deepcopy(angles_p_data)
-    angles_data.extend(deepcopy(angles_n_data))
-    angles_data.sort(key=lambda a: a['startpos'])
-    angles_bends = []
-    for peak in angles_data:
-        start = angles.original_list[peak['startpos']]
-        end = angles.original_list[peak['endpos']]
-        angle_change = end - start
-        bend = {
-            'angle change': abs(angle_change),
-            'angle start': abs(start),
-            'angle end': abs(end),
-            'dur': peak['length'] / metadata['fps'],
-            'angular velocity': abs(angle_change) / peak['length'] * metadata['fps'],
-            'bend pos': max(bend_poss.list[peak['startpos']:(peak['endpos'] + 1)])}
-        if angle_change > 0:
-            bend.update({'laterality': 'left'})
-            if start * 0.2 + end * 0.8 > angle_neutral:
-                bend.update({'recoil': False})
+    for i in range(angles.dflns_count):
+        angles.dflns[i].dict.update({
+            'angle change': abs(angles.dflns[i].change),
+            'angle start': angles.dflns[i].startval,
+            'angle end': angles.dflns[i].endval,
+            'bend duration': angles.dflns[i].dur,
+            'bend_angular_velocity': angles.dflns[i].maxslope,
+            'bend_position': max(bend_poss.list[angles.dflns[i].startpos:(angles.dflns[i].endpos + 1)])})
+        if angles.dflns[i].change > 0:
+            angles.dflns[i].dict.update({'bend_laterality': 'left'})
+            if angles.dflns[i].startval * 0.2 + angles.dflns[i].endval * 0.8 > angle_neutral:
+                angles.dflns[i].dict.update({'recoil': False})
             else:
-                bend.update({'recoil': True})
+                angles.dflns[i].dict.update({'recoil': True})
         else:
-            bend.update({'laterality': 'right'})
-            if start * 0.2 + end * 0.8 < angle_neutral:
-                bend.update({'recoil': False})
+            angles.dflns[i].dict.update({'bend_laterality': 'right'})
+            if angles.dflns[i].startval * 0.2 + angles.dflns[i].endval * 0.8 < angle_neutral:
+                angles.dflns[i].dict.update({'recoil': False})
             else:
-                bend.update({'recoil': True})
-        angles_bends.append(bend)
+                angles.dflns[i].dict.update({'recoil': True})
+        angles.dflns[i].env.update({'speed': cdist1s[round(angles.dflns[i].centralpos)]})
+    
+    analysis_df = results_df(pd.DataFrame())
+    
+    speeds_df = [d.dict for d in speeds.p_dflns]
+    for i in range(speeds.p_dflns_count):
+        speeds_df[i].update(speeds.p_dflns[i].env)
+    speeds_df = pd.DataFrame(speeds_df)
+    speeds_methods = {'acceleration': agg2,
+                      'speed_change': agg1}
+    speeds_DF = DF(speeds_df, 'acceleration', speeds_methods.keys())
+    analysis_df.add(speeds_DF.agg(speeds_methods))
+    analysis_df.add(speeds_DF.stratify1('speed'))
+    
+    fdirs_df = [d.dict for d in fdirs.dflns]
+    for i in range(fdirs.dflns_count):
+        fdirs_df[i].update(fdirs.dflns[i].env)
+    fdirs_df = pd.DataFrame(fdirs_df)
+    fdirs_methods = {'turn_angle': agg1,
+                     'turn_angular_velocity': agg2,
+                     'turn_duration': agg1}
+    fdirs_DF = DF(fdirs_df, 'turn', fdirs_methods.keys())
+    fdirs_DF.dfs.update({
+        'turn left': fdirs_df[fdirs_df['turn_laterality'] == 'left'],
+        'turn right': fdirs_df[fdirs_df['turn_laterality'] == 'right']})
+    analysis_df.add(fdirs_DF.agg(fdirs_methods))
+    analysis_df.add(fdirs_DF.agg(fdirs_methods, 'turn left'))
+    analysis_df.add(fdirs_DF.agg(fdirs_methods, 'turn right'))
+    analysis_df.add(fdirs_DF.stratify1('speed'))
+    
+    total_turn_angle = analysis_df.df.loc[(analysis_df.df['Type'] == 'turn') &
+                                          analysis_df.df['Classify'].isna() &
+                                          (analysis_df.df['Parameter'] == 'turn_angle') &
+                                          (analysis_df.df['Method'] == 'sum'), 'Value']
+    analysis.update({'meandering': total_turn_angle.iloc[0] / total_distance})
+    
+    angles_df = [d.dict for d in angles.dflns]
+    for i in range(angles.dflns_count):
+        angles_df[i].update(angles.dflns[i].env)
+    angles_df = pd.DataFrame(angles_df)
+    angles_methods = {'angle change': agg1,
+                      'bend duration': agg1,
+                      'bend_position': agg2,
+                      'bend_angular_velocity': agg2}
+    angles_DF = DF(angles_df, 'bend', angles_methods.keys())
+    angles_DF.dfs.update({
+        'bend left': angles_df[angles_df['bend_laterality'] == 'left'],
+        'bend right': angles_df[angles_df['bend_laterality'] == 'right']})
+    analysis_df.add(angles_DF.agg(angles_methods))
+    analysis_df.add(angles_DF.agg(angles_methods, 'bend left'))
+    analysis_df.add(angles_DF.agg(angles_methods, 'bend right'))
+    analysis_df.add(angles_DF.stratify1('speed'))
+    
+    recoils_df = angles_df[angles_df['recoil'] == True]
+    recoils_DF = DF(recoils_df, 'recoil', angles_methods.keys())
+    recoils_DF.dfs.update({
+        'bend left': recoils_df[recoils_df['bend_laterality'] == 'left'],
+        'bend right': recoils_df[recoils_df['bend_laterality'] == 'right']})
+    analysis_df.add(recoils_DF.agg(angles_methods))
+    analysis_df.add(recoils_DF.agg(angles_methods, 'bend left'))
+    analysis_df.add(recoils_DF.agg(angles_methods, 'bend right'))
+    analysis_df.add(recoils_DF.stratify1('speed'))
     
     steps = []
-    for datum in accels_data:
-        step = step_datum()
-        step.accel = datum
-        steps.append(step)
-    steps_count = len(steps)
-    for i in range(steps_count):
-        for j in range(len(turns_data)):
-            if not turns_data[j]['belong']:
-                if turns_data[j]['endpos'] >= steps[i].accel['startpos'] and turns_data[j]['startpos'] <= steps[i].accel['endpos']:
-                    turns_data[j].update({'belong': True})
-                    steps[i].turns.append(turns_steps[j])
-                    steps[i].turns_peaks.append(turns_data[j])
-        for j in range(len(angles_data)):
-            if not angles_data[j]['belong']:
-                if angles_data[j]['endpos'] >= steps[i].accel['startpos'] and angles_data[j]['startpos'] <= steps[i].accel['endpos']:
-                    angles_data[j].update({'belong': True})
-                    steps[i].bends.append(angles_bends[j])
-                    steps[i].bends_peaks.append(angles_data[j])
-    for i in range(len(turns_data)):
-        if turns_data[i]['belong'] == False and turns_steps[i]['angle'] > settings['min_step_turn']:
-            step = step_datum()
-            step.turns_peaks = [turns_data[i]]
-            step.turns = [turns_steps[i]]
-            for j in range(len(angles_data)):
-                if not angles_data[j]['belong']:
-                    if angles_data[j]['endpos'] >= turns_data[i]['startpos'] and angles_data[j]['startpos'] <= turns_data[i]['endpos']:
-                        angles_data[j].update({'belong': True})
-                        step.bends.append(angles_bends[j])
-                        step.bends_peaks.append(angles_data[j])
-            if len(step.bends) >= 1:
-                steps.append(step)
-    steps_count = len(steps)
     
+    for i in range(speeds.p_dflns_count):
+        
+        candidates = []
+        scores = []
+        for j in range(angles.dflns_count):
+            if angles.dflns[j].belong == -1 and not angles.dflns[j].dict['recoil']:
+                if angles.dflns[j].endpos >= speeds.p_dflns[i].startpos and angles.dflns[j].startpos <= speeds.p_dflns[i].endpos:
+                    candidates.append(j)
+                    scores.append(abs(angles.dflns[j].centralpos - speeds.p_dflns[i].centralpos))
+        
+        if len(candidates) == 0:
+            continue
+        
+        choice = candidates[scores.index(min(scores))]
+        s = step()
+        s.accel = speeds.p_dflns[i]
+        s.bends.append(angles.dflns[choice])
+        angles.dflns[choice].belong = s.accel.centralpos
+        
+        for j in range(fdirs.dflns_count):
+            if fdirs.dflns[j].belong == -1:
+                if fdirs.dflns[j].endpos >= s.accel.startpos and fdirs.dflns[j].startpos <= s.accel.endpos:
+                    fdirs.dflns[j].belong = s.accel.centralpos
+                    s.turns.append(fdirs.dflns[j])
+        
+        steps.append(s)
+    
+    for i in range(fdirs.dflns_count):
+        
+        if fdirs.dflns[i].belong != -1:
+            continue
+        
+        candidates = []
+        scores = []
+        for j in range(angles.dflns_count):
+            if angles.dflns[j].belong == -1:
+                if angles.dflns[j].endpos >= fdirs.dflns[i].startpos and angles.dflns[j].startpos <= fdirs.dflns[i].endpos:
+                    candidates.append(j)
+                    scores.append(abs(angles.dflns[j].centralpos - fdirs.dflns[i].centralpos))
+        
+        if len(candidates) == 0:
+            continue
+        
+        choice = candidates[scores.index(min(scores))]
+        s = step()
+        s.turns.append(fdirs.dflns[i])
+        fdirs.dflns[i].belong = fdirs.dflns[i].centralpos
+        s.bends.append(angles.dflns[choice])
+        angles.dflns[choice].belong = s.turns[0].centralpos
+        
+        steps.append(s)
+    
+    steps_count = len(steps)
     for i in range(steps_count):
         if steps[i].accel != None:
-            steps[i].startpos = steps[i].accel['startpos']
-            steps[i].coastpos = steps[i].accel['endpos']
+            steps[i].startpos = steps[i].accel.startpos
+            steps[i].coastpos = steps[i].accel.endpos
         else:
-            steps[i].startpos = steps[i].turns_peaks[0]['startpos']
-            steps[i].coastpos = steps[i].turns_peaks[0]['endpos']
+            steps[i].startpos = steps[i].turns[0].startpos
+            steps[i].coastpos = steps[i].turns[0].endpos
+        steps[i].centralpos = (steps[i].startpos + steps[i].coastpos) / 2
     steps.sort(key=lambda a: a.startpos)
     for i in range(steps_count - 1):
         steps[i].endpos = steps[i + 1].startpos - 1
     steps[steps_count - 1].endpos = l - 1
     
-    front = settings['front_window'] * metadata['fps']
-    back = settings['back_window'] * metadata['fps']
-    for i in range(len(angles_data)):
-        if angles_data[i]['belong'] == False and angles_bends[i]['recoil']:
+    for i in range(angles.dflns_count):
+        if angles.dflns[i].belong == -1 and not angles.dflns[i].dict['recoil']:
+            candidates = []
+            scores = []
             for j in range(steps_count):
-                if angles_data[i]['startpos'] > steps[j].coastpos:
-                    if angles_data[i]['startpos'] <= steps[j].coastpos + back:
-                        angles_data[i].update({'belong': True})
-                        steps[j].bends_peaks.append(angles_data[i])
-                        steps[j].bends.append(angles_bends[i])
-                        break
-    for i in range(len(angles_data)):
-        if angles_data[i]['belong'] == False and not angles_bends[i]['recoil']:
-            for j in range(steps_count):
-                if angles_data[i]['startpos'] >= steps[j].startpos - front:
-                    if angles_data[i]['startpos'] < steps[j].startpos:
-                        if len(steps[j].bends) >= 1:
-                            if angles_bends[i]['laterality'] == steps[j].bends[0]['laterality']:
-                                continue
-                        angles_data[i].update({'belong': True})
-                        steps[j].bends_peaks.append(angles_data[i])
-                        steps[j].bends.append(angles_bends[i])
-                        break
+                if angles.dflns[i].endpos >= steps[j].startpos and angles.dflns[i].startpos <= steps[j].coastpos:
+                    candidates.append(j)
+                    scores.append(abs(angles.dflns[i].centralpos - steps[j].centralpos))
+            if len(candidates) == 0:
+                continue
+            choice = candidates[scores.index(min(scores))]
+            steps[choice].bends.append(angles.dflns[i])
+            angles.dflns[i].belong = steps[choice].centralpos
     
-    for step in steps:
+    for i in range(1, angles.dflns_count):
+        if angles.dflns[i].belong == -1 and angles.dflns[i].dict['recoil']:
+            if angles.dflns[i - 1].belong != -1:
+                if angles.dflns[i - 1].endpos >= angles.dflns[i].startpos - 2:
+                    choice = -1
+                    for j in range(steps_count):
+                        if steps[j].centralpos == angles.dflns[i - 1].belong:
+                            choice = j
+                            break
+                    if choice == -1:
+                        continue
+                    steps[choice].bends.append(angles.dflns[i])
+                    angles.dflns[i].belong = steps[choice].centralpos
+    
+    if settings['plot_figure']:
+        fig, ax = plt.subplots() #step pairing graph
+        speeds_scaled = [speed / fps for speed in speeds.list]
+        turns_scaled = [turn / fps for turn in fdirs.dt_curve.list]
+        ax.plot(speeds_scaled, 'c')
+        ax.plot(turns_scaled, 'y')
+        ax.plot(angles.list, 'm')
+        i = 0
+        colors = ['r', 'g', 'b']
+        for s in steps:
+            c = colors[i]
+            i += 1
+            if i == 3:
+                i = 0
+            if s.accel != None:
+                plot_data(ax, speeds_scaled, s.startpos, s.coastpos + 1, c)
+            for turn in s.turns:
+                plot_data(ax, turns_scaled, turn.startpos, turn.endpos + 1, c)
+            for bend in s.bends:
+                plot_data(ax, angles.list, bend.startpos, bend.endpos + 1, c)
+    
+    for s in steps:
         
-        step.properties.update({
-            'current speed': cdist1s[step.startpos],
-            'step length': sum(cen_dists[(step.startpos + 1):(step.endpos + 1)]),
-            'step dur': (step.endpos + 1 - step.startpos) / metadata['fps'],
-            'speed change': max(0, speeds.list[step.coastpos] - speeds.list[step.startpos])})
-        if step.accel != None:
-            step.properties.update({
-                'speed change': step.accel['change'],
-                'accel': step.accel['meanslope'] * metadata['fps']})
+        s.properties.update({
+            'current_speed': cdist1s[round(s.centralpos)],
+            'step_length': sum(cen_dists[(s.startpos + 1):(s.endpos + 1)]),
+            'step_dur': (s.endpos + 1 - s.startpos) / fps})
+        if s.accel != None:
+            s.properties.update({
+                'speed_change': s.accel.dict['speed_change'],
+                'accel': s.accel.dict['acceleration']})
         else:
-            step.properties.update({'accel': step.properties['speed change'] * metadata['fps']})
+            s.properties.update({
+                'speed_change': 0,
+                'accel': 0})
         
-        step.properties['coast dur'] = max(0, step.endpos + 1 - step.coastpos) / metadata['fps']
-        step.properties['coast percent'] = step.properties['coast dur'] / step.properties['step dur'] * 100
+        s.properties['coast_dur'] = max(0, s.endpos + 1 - s.coastpos) / fps
+        s.properties['coast_percent'] = s.properties['coast_dur'] / s.properties['step_dur'] * 100
         
-        step.turns_count = len(step.turns)
-        step.bends_count = len(step.bends)
-        step.properties['bend count'] = step.bends_count
+        s.turns_count = len(s.turns)
+        s.bends_count = len(s.bends)
+        s.properties['bend count'] = s.bends_count
         
-    for step in steps:
+    for s in steps:
         
-        startpos = round(max(0, step.startpos - metadata['fps'] / 2))
-        endpos = round(min(l - 1, step.startpos + metadata['fps'] / 2))
+        startpos = round(max(0, s.startpos - fps / 2))
+        endpos = round(min(l - 1, s.startpos + fps / 2))
         current_bend_count = 0
-        for i in range(len(angles_data)):
-            bend_startpos = angles_data[i]['startpos']
+        for i in range(angles.dflns_count):
+            bend_startpos = angles.dflns[i].startpos
             if bend_startpos >= startpos and bend_startpos <= endpos:
                 current_bend_count += 1
-        step.properties['current bend per second'] = current_bend_count / (endpos - startpos) * metadata['fps']
+        s.properties['current bend per second'] = current_bend_count / (endpos - startpos) * fps
         current_step_count = 0
         for i in range(steps_count):
             if steps[i].startpos >= startpos and steps[i].startpos <= endpos:
                 current_step_count += 1
-        step.properties['current step per second'] = current_step_count / (endpos - startpos) * metadata['fps']
+        s.properties['current step per second'] = current_step_count / (endpos - startpos) * fps
         
-        if step.turns_count >= 1:
+        if s.turns_count >= 1:
             
-            turns_durs = [turn['dur'] for turn in step.turns]
-            turns_angles = [turn['angle'] for turn in step.turns]
-            turns_angular_velocitys = [turn['angular velocity'] for turn in step.turns]
-            turn_angle_overall = directions_free.list[step.turns_peaks[step.turns_count - 1]['endpos']] - directions_free.list[step.turns_peaks[0]['startpos']]
-            step.properties.update({'turn angle': abs(turn_angle_overall)})
+            turns_durs = [turn.dict['turn_duration'] for turn in s.turns]
+            turns_angles = [turn.dict['turn_angle'] for turn in s.turns]
+            turns_angular_velocitys = [turn.dict['turn_angular_velocity'] for turn in s.turns]
+            turn_angle_overall = fdirs.list[s.turns[s.turns_count - 1].endpos] - fdirs.list[s.turns[0].startpos]
+            s.properties.update({'turn_angle': abs(turn_angle_overall)})
             
             if abs(turn_angle_overall) >= settings['min_turn_angle']:
                 if turn_angle_overall > settings['min_turn_angle']:
-                    step.properties.update({'turn laterality': 'right'})
+                    s.properties.update({'turn_laterality': 'right'})
                 elif turn_angle_overall < -settings['min_turn_angle']:
-                    step.properties.update({'turn laterality': 'left'})
-                step.properties.update({
-                    'turn dur': turns_durs[turns_angles.index(max(turns_angles))],
-                    'turn angular velocity': turns_angular_velocitys[turns_angles.index(max(turns_angles))]})
+                    s.properties.update({'turn_laterality': 'left'})
+                s.properties.update({
+                    'turn_dur': turns_durs[turns_angles.index(max(turns_angles))],
+                    'turn_angular_velocity': turns_angular_velocitys[turns_angles.index(max(turns_angles))]})
         
-        startpos = step.startpos
-        coastpos = step.coastpos
-        if step.accel != None and step.turns_count >= 1:
+        startpos = s.startpos
+        coastpos = s.coastpos
+        if s.accel != None and s.turns_count >= 1:
             if abs(turn_angle_overall) >= settings['min_turn_angle']:
-                startpos = min(step.accel['startpos'], step.turns_peaks[0]['startpos'])
-                coastpos = max(step.accel['endpos'], step.turns_peaks[step.turns_count - 1]['endpos'])
+                startpos = min(s.accel.startpos, s.turns[0].startpos)
+                coastpos = max(s.accel.endpos, s.turns[s.turns_count - 1].endpos)
         a = speeds.list[startpos]
         b = speeds.list[coastpos]
-        if step.turns_count >= 1:
+        if s.turns_count >= 1:
             angle = abs(turn_angle_overall)
         else:
             angle = 0
-        step.properties.update({'velocity change': math.sqrt(a ** 2 + b ** 2 - 2 * a * b * math.cos(angle))})
+        s.properties.update({'velocity_change': math.sqrt(a ** 2 + b ** 2 - 2 * a * b * math.cos(angle))})
         
-        if step.bends_count == 0:
+        if s.bends_count == 0:
             
             continue
         
-        elif step.bends_count == 1:
+        elif s.bends_count == 1:
             
-            step.properties.update({
-                'bend angle reached': max(step.bends[0]['angle start'], step.bends[0]['angle end']),
-                'bend laterality': step.bends[0]['laterality'],
-                'bend angle traveled': step.bends[0]['angle change'],
-                'bend dur total': step.bends[0]['dur'],
-                'bend angular velocity': step.bends[0]['angular velocity'],
-                'bend pos': step.bends[0]['bend pos']})
+            s.properties.update({
+                'bend_angle_reached': max(abs(s.bends[0].dict['angle start']), abs(s.bends[0].dict['angle end'])),
+                'bend_laterality': s.bends[0].dict['bend_laterality'],
+                'bend_angle_traveled': s.bends[0].dict['angle change'],
+                'bend_dur_total': s.bends[0].dict['bend duration'],
+                'bend_angular_velocity': s.bends[0].dict['bend_angular_velocity'],
+                'bend_pos': s.bends[0].dict['bend_position']})
         
-        elif step.bends_count == 2:
+        elif s.bends_count == 2:
             
-            step.properties.update({
-                'bend angle reached': step.bends[0]['angle end'],
-                'bend laterality': step.bends[0]['laterality'],
-                'bend angle traveled': step.bends[0]['angle change'] + step.bends[1]['angle change'],
-                'bend dur total': step.bends[0]['dur'] + step.bends[1]['dur'],
-                'bend angular velocity': step.bends[0]['angular velocity'],
-                'bend pos': step.bends[0]['bend pos']})
-            if step.bends[0]['angle change'] < step.bends[1]['angle change']:
-                step.properties['max angle pos'] = 1
+            s.properties.update({
+                'bend_angle_reached': abs(s.bends[0].dict['angle end']),
+                'bend_laterality': s.bends[0].dict['bend_laterality'],
+                'bend_angle_traveled': s.bends[0].dict['angle change'] + s.bends[1].dict['angle change'],
+                'bend_dur_total': s.bends[0].dict['bend duration'] + s.bends[1].dict['bend duration'],
+                'bend_angular_velocity': s.bends[0].dict['bend_angular_velocity'],
+                'bend_pos': s.bends[0].dict['bend_position']})
+            if s.bends[0].dict['angle change'] < s.bends[1].dict['angle change']:
+                s.properties['max angle pos'] = 1
         
-        elif step.bends_count >= 3:
+        elif s.bends_count >= 3:
             
-            angles_reached = [step.bends[i]['angle end'] for i in range(step.bends_count - 1)]
-            angles_traveled = [step.bends[i]['angle change'] for i in range(step.bends_count)]
-            angular_velocitys = [bend['angular velocity'] for bend in step.bends]
-            durs = [bend['dur'] for bend in step.bends]
-            bend_pos = [step.bends[i]['bend pos'] for i in range(step.bends_count)]
+            angles_reached = [s.bends[i].dict['angle end'] for i in range(s.bends_count - 1)]
+            angles_traveled = [s.bends[i].dict['angle change'] for i in range(s.bends_count)]
+            angular_velocitys = [bend.dict['bend_angular_velocity'] for bend in s.bends]
+            durs = [bend.dict['bend duration'] for bend in s.bends]
+            bend_pos = [s.bends[i].dict['bend_position'] for i in range(s.bends_count)]
             
             angle_max = 0
             angle_max_left = 0
@@ -1089,150 +1046,68 @@ for file in os.listdir('.'):
                 angle_laterality = 'neutral'
             max_angle_pos = [abs(angle) for angle in angles_reached].index(angle_max)
             
-            step.properties.update({
-                'bend angle reached': angle_max,
-                'bend laterality': angle_laterality,
-                'bend angle traveled': sum(angles_traveled),
-                'bend dur total': sum(durs),
-                'bend angular velocity': max(angular_velocitys),
-                'bend pos': max(bend_pos),
+            s.properties.update({
+                'bend_angle_reached': angle_max,
+                'bend_laterality': angle_laterality,
+                'bend_angle_traveled': sum(angles_traveled),
+                'bend_dur_total': sum(durs),
+                'bend_angular_velocity': max(angular_velocitys),
+                'bend_pos': max(bend_pos),
                 'max angle pos': max_angle_pos})
             
-        step.properties.update({'bend wave frequency': step.bends_count / step.properties['bend dur total']})
+        s.properties.update({'bend_wave_frequency': s.bends_count / s.properties['bend_dur_total']})
     
-    if settings['plot_figure']:
-        fig, ax = plt.subplots()
-        speeds_scaled = [speed / 100 for speed in speeds.list]
-        ax.plot(speeds_scaled, 'c')
-        ax.plot(turns.list, 'y')
-        ax.plot(angles.list, 'm')
-        i = 0
-        colors = ['r', 'g', 'b']
-        for step in steps:
-            c = colors[i]
-            i += 1
-            if i == 3:
-                i = 0
-            if step.accel != None:
-                plot_data(ax, speeds_scaled, step.startpos, step.coastpos + 1, c)
-            for peak in step.turns_peaks:
-                plot_data(ax, turns.list, peak['startpos'], peak['endpos'] + 1, c)
-            for peak in step.bends_peaks:
-                plot_data(ax, angles.list, peak['startpos'], peak['endpos'] + 1, c)
-        fig, ax = plt.subplots()
-        speeds_scaled = [speed / 100 for speed in speeds.list]
-        ax.plot(speeds_scaled, 'c')
-        ax.plot(turns.list, 'y')
-        ax.plot(angles.list, 'm')
-        for step in steps:
-            if step.properties['bend count'] <= 2:
-                c = 'g'
-            elif step.properties['bend count'] >= 3:
-                c = 'b'
-            else:
-                c = 'r'
-            if step.accel != None:
-                plot_data(ax, speeds_scaled, step.startpos, step.coastpos + 1, c)
-            for peak in step.turns_peaks:
-                plot_data(ax, turns.list, peak['startpos'], peak['endpos'] + 1, c)
-            for peak in step.bends_peaks:
-                plot_data(ax, angles.list, peak['startpos'], peak['endpos'] + 1, c)
-    
-    analysis_df = pd.DataFrame()
-    
-    turns_df = pd.DataFrame(turns_steps)
-    
-    angles_df = pd.DataFrame(angles_bends)
-    angles_methods = {'angle change': agg1,
-                      'dur': agg1,
-                      'bend pos': agg2,
-                      'angular velocity': agg2}
-    angles_DF = DF(angles_df, 'bend', angles_methods.keys())
-    angles_DF.dfs.update({
-        'bend left': angles_df[angles_df['laterality'] == 'left'],
-        'bend right': angles_df[angles_df['laterality'] == 'right']})
-    analysis_df = pd.concat([analysis_df, angles_DF.agg(angles_methods)])
-    analysis_df = pd.concat([analysis_df, angles_DF.agg(angles_methods, 'bend left')])
-    analysis_df = pd.concat([analysis_df, angles_DF.agg(angles_methods, 'bend right')])
-    
-    recoils_df = angles_df[angles_df['recoil'] == True]
-    recoils_DF = DF(recoils_df, 'recoil', angles_methods.keys())
-    recoils_DF.dfs.update({
-        'bend left': recoils_df[recoils_df['laterality'] == 'left'],
-        'bend right': recoils_df[recoils_df['laterality'] == 'right']})
-    analysis_df = pd.concat([analysis_df, recoils_DF.agg(angles_methods)])
-    analysis_df = pd.concat([analysis_df, recoils_DF.agg(angles_methods, 'bend left')])
-    analysis_df = pd.concat([analysis_df, recoils_DF.agg(angles_methods, 'bend right')])
-    
-    steps_df = pd.DataFrame([step.properties for step in steps])
+    steps_df = pd.DataFrame([s.properties for s in steps])
     steps_df = steps_df[steps_df['bend count'] >= 1]
     steps_methods = {
-        'step length': agg2,
-        'speed change': agg1,
-        'velocity change': agg1,
+        'step_length': agg2,
+        'speed_change': agg1,
+        'velocity_change': agg1,
         'accel': agg2,
-        'current speed': [],
-        'step dur': agg2,
-        'coast dur': agg1,
-        'coast percent': agg2,
+        'current_speed': [],
+        'step_dur': agg2,
+        'coast_dur': agg1,
+        'coast_percent': agg2,
         'current step per second': agg3,
         'current bend per second': agg3,
-        'turn angle': agg1,
-        'turn dur': agg1,
-        'turn angular velocity': agg2,
-        'bend angle reached': agg2,
-        'bend pos': agg2,
-        'bend angle traveled': agg2,
-        'bend angular velocity': agg2,
-        'bend dur total': agg2,
-        'bend wave frequency': agg2}
+        'turn_angle': agg2,
+        'turn_dur': agg2,
+        'turn_angular_velocity': agg2,
+        'bend_angle_reached': agg2,
+        'bend_pos': agg2,
+        'bend_angle_traveled': agg2,
+        'bend_angular_velocity': agg2,
+        'bend_dur_total': agg2,
+        'bend_wave_frequency': agg2}
     steps_DF = DF(steps_df, 'step', steps_methods.keys())
     steps_DF.dfs.update({
-        'HT': steps_df[steps_df['bend count'] <= 2],
-        'MT': steps_df[steps_df['bend count'] >= 3],
-        'turn left': steps_df[steps_df['turn laterality'] == 'left'],
-        'turn right': steps_df[steps_df['turn laterality'] == 'right'],
-        'with turn': steps_df[steps_df['turn laterality'] != 'neutral'],
-        'without turn': steps_df[steps_df['turn laterality'] == 'neutral'],
-        'bend left': steps_df[steps_df['bend laterality'] == 'left'],
-        'bend right': steps_df[steps_df['bend laterality'] == 'right']})
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods)])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'HT')])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'MT')])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'turn left')])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'turn right')])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'with turn')])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'without turn')])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'bend left')])
-    analysis_df = pd.concat([analysis_df, steps_DF.agg(steps_methods, 'bend right')])
+        'turn left': steps_df[steps_df['turn_laterality'] == 'left'],
+        'turn right': steps_df[steps_df['turn_laterality'] == 'right'],
+        'with turn': steps_df[steps_df['turn_laterality'] != 'neutral'],
+        'without turn': steps_df[steps_df['turn_laterality'] == 'neutral'],
+        'bend left': steps_df[steps_df['bend_laterality'] == 'left'],
+        'bend right': steps_df[steps_df['bend_laterality'] == 'right']})
     
-    analysis_df = pd.concat([analysis_df, steps_DF.stratify()])
-    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('HT', 'MT')])
-    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('turn left', 'turn right')])
-    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('with turn', 'without turn')])
-    analysis_df = pd.concat([analysis_df, steps_DF.stratify2('bend left', 'bend right')])
+    analysis_df.add(steps_DF.agg(steps_methods))
+    analysis_df.add(steps_DF.agg(steps_methods, 'turn left'))
+    analysis_df.add(steps_DF.agg(steps_methods, 'turn right'))
+    analysis_df.add(steps_DF.agg(steps_methods, 'with turn'))
+    analysis_df.add(steps_DF.agg(steps_methods, 'without turn'))
+    analysis_df.add(steps_DF.agg(steps_methods, 'bend left'))
+    analysis_df.add(steps_DF.agg(steps_methods, 'bend right'))
     
-    comparisons = pd.DataFrame()
-    comparisons = pd.concat([comparisons, angles_DF.compare('bend left', 'bend right')])
-    comparisons = pd.concat([comparisons, steps_DF.compare('HT', 'MT')])
-    comparisons = pd.concat([comparisons, steps_DF.compare('turn left', 'turn right')])
-    comparisons = pd.concat([comparisons, steps_DF.compare('with turn', 'without turn')])
-    comparisons = pd.concat([comparisons, steps_DF.compare('bend left', 'bend right')])
-    comparisons = pd.concat([comparisons, steps_DF.twoway('HT', 'MT')])
-    comparisons = pd.concat([comparisons, steps_DF.twoway('turn left', 'turn right')])
-    comparisons = pd.concat([comparisons, steps_DF.twoway('with turn', 'without turn')])
-    comparisons = pd.concat([comparisons, steps_DF.twoway('bend left', 'bend right')])
+    for i in steps_methods:
+        analysis_df.add(steps_DF.stratify1(i))
+    analysis_df.add(steps_DF.stratify2('turn left', 'turn right'))
+    analysis_df.add(steps_DF.stratify2('with turn', 'without turn'))
+    analysis_df.add(steps_DF.stratify2('bend left', 'bend right'))
     
-    if settings['save_individually']:
-        turns_df.to_csv(path + '/' + videoname + '_turns_df.csv', index=False)
-        angles_df.to_csv(path + '/' + videoname + '_angles_df.csv', index=False)
-        steps_df.to_csv(path + '/' + videoname + '_steps_df.csv', index=False)
-        comparisons.to_csv(path + '/' + videoname + '_comparisons.csv', index=False)
+    speeds_df.to_csv(path + '/' + videoname + '_accelerations_df.csv', index=False)
+    fdirs_df.to_csv(path + '/' + videoname + '_turns_df.csv', index=False)
+    angles_df.to_csv(path + '/' + videoname + '_angles_df.csv', index=False)
     
     steps_df['video'] = videoname
     steps_all = pd.concat([steps_all, steps_df])
-    comparisons['video'] = videoname
-    comparisons_all = pd.concat([comparisons_all, comparisons])
     
     rp = []
     for i in steps_methods.keys():
@@ -1258,19 +1133,13 @@ for file in os.listdir('.'):
     rp_df['video'] = videoname
     rps_df = pd.concat([rps_df, rp_df])
     
-    if settings['save_individually']:
-        with open(path + '/' + videoname + '_analysis.csv', 'w') as f:
-            for key in analysis:
-                f.write(key + ', ' + str(analysis[key]) + '\n')
-        print('Analysis of ' + videoname + ' complete.')
-    
+    print('Analysis of ' + videoname + ' complete.')
     analyses.append(analysis)
     
-    #analysis_df.to_csv(path + '/' + videoname + '_analysis_df.csv')
     if first_video:
-        analyses_df = analysis_df[['Type', 'Classify', 'Stratify', 'Parameter', 'Method']]
+        analyses_df = analysis_df.df[['Type', 'Classify', 'Stratify', 'Parameter', 'Method']]
         first_video = False
-    analyses_df[videoname] = analysis_df['Value']
+    analyses_df[videoname] = analysis_df.df['Value']
     
     with open(path + '/' + videoname + '_analysis_notes.csv', 'w') as f:
         for key in settings:
@@ -1284,10 +1153,13 @@ analyses.columns = videonames
 analyses.to_csv('analyses.csv')
 
 analyses_df.to_csv('analyses_df.csv', index=False)
+if not settings['spine_analysis']:
+    from sys import exit
+    exit()
 
 steps_all_adjusted = pd.DataFrame(steps_all)
 analyses_df_adjusted = pd.DataFrame(analyses_df)
-adjusts = ['current speed', 'step length', 'speed change', 'velocity change', 'accel']
+adjusts = ['current_speed', 'step_length', 'speed_change', 'velocity_change', 'accel']
 for videoname in videonames:
     fish_length = analyses.at['fish_length', videoname]
     steps_all_adjusted.loc[steps_all_adjusted['video'] == videoname, adjusts] = steps_all_adjusted.loc[steps_all_adjusted['video'] == videoname, adjusts].transform(lambda a: a / fish_length)
@@ -1296,7 +1168,6 @@ steps_all_adjusted.to_csv('steps_all_adjusted.csv', index=False)
 analyses_df_adjusted.to_csv('analyses_df_adjusted.csv', index=False)
 print('All analyses complete.')
 
-comparisons_all.to_csv('comparisons_all.csv', index=False)
 rps_df = rps_df.sort_values(by=['x', 'y'])
 rps_df.to_csv('rps.csv', index=False)
 
