@@ -262,12 +262,12 @@ class step:
             'step_dur': 0,
             'coast_dur': 0,
             'coast_percent': 100,
-            'current step per second': 0,
+            'current_step_s': 0,
             'turn_angle': 0,
             'turn_laterality': 'neutral',
             'turn_dur': 0,
             'turn_angular_velocity': 0,
-            'current bend per second': 0,
+            'current_bend_s': 0,
             'bend_angle_reached': 0,
             'bend_laterality': 'neutral',
             'bend_pos': 0,
@@ -726,12 +726,12 @@ for file in os.listdir('.'):
     
     for i in range(angles.dflns_count):
         angles.dflns[i].dict.update({
-            'angle change': abs(angles.dflns[i].change),
+            'angle_change': abs(angles.dflns[i].change),
             'angle start': angles.dflns[i].startval,
             'angle end': angles.dflns[i].endval,
-            'bend duration': angles.dflns[i].dur,
+            'bend_dur': angles.dflns[i].dur,
             'bend_angular_velocity': angles.dflns[i].maxslope,
-            'bend_position': max(bend_poss.list[angles.dflns[i].startpos:(angles.dflns[i].endpos + 1)])})
+            'bend_pos': max(bend_poss.list[angles.dflns[i].startpos:(angles.dflns[i].endpos + 1)])})
         if angles.dflns[i].change > 0:
             angles.dflns[i].dict.update({'bend_laterality': 'left'})
             if angles.dflns[i].startval * 0.2 + angles.dflns[i].endval * 0.8 > angle_neutral:
@@ -784,9 +784,9 @@ for file in os.listdir('.'):
     for i in range(angles.dflns_count):
         angles_df[i].update(angles.dflns[i].env)
     angles_df = pd.DataFrame(angles_df)
-    angles_methods = {'angle change': agg1,
-                      'bend duration': agg1,
-                      'bend_position': agg2,
+    angles_methods = {'angle_change': agg1,
+                      'bend_dur': agg1,
+                      'bend_pos': agg2,
                       'bend_angular_velocity': agg2}
     angles_DF = DF(angles_df, 'bend', angles_methods.keys())
     angles_DF.dfs.update({
@@ -955,12 +955,12 @@ for file in os.listdir('.'):
             bend_startpos = angles.dflns[i].startpos
             if bend_startpos >= startpos and bend_startpos <= endpos:
                 current_bend_count += 1
-        s.properties['current bend per second'] = current_bend_count / (endpos - startpos) * fps
+        s.properties['current_bend_s'] = current_bend_count / (endpos - startpos) * fps
         current_step_count = 0
         for i in range(steps_count):
             if steps[i].startpos >= startpos and steps[i].startpos <= endpos:
                 current_step_count += 1
-        s.properties['current step per second'] = current_step_count / (endpos - startpos) * fps
+        s.properties['current_step_s'] = current_step_count / (endpos - startpos) * fps
         
         if s.turns_count >= 1:
             
@@ -1002,30 +1002,30 @@ for file in os.listdir('.'):
             s.properties.update({
                 'bend_angle_reached': max(abs(s.bends[0].dict['angle start']), abs(s.bends[0].dict['angle end'])),
                 'bend_laterality': s.bends[0].dict['bend_laterality'],
-                'bend_angle_traveled': s.bends[0].dict['angle change'],
-                'bend_dur_total': s.bends[0].dict['bend duration'],
+                'bend_angle_traveled': s.bends[0].dict['angle_change'],
+                'bend_dur_total': s.bends[0].dict['bend_dur'],
                 'bend_angular_velocity': s.bends[0].dict['bend_angular_velocity'],
-                'bend_pos': s.bends[0].dict['bend_position']})
+                'bend_pos': s.bends[0].dict['bend_pos']})
         
         elif s.bends_count == 2:
             
             s.properties.update({
                 'bend_angle_reached': abs(s.bends[0].dict['angle end']),
                 'bend_laterality': s.bends[0].dict['bend_laterality'],
-                'bend_angle_traveled': s.bends[0].dict['angle change'] + s.bends[1].dict['angle change'],
-                'bend_dur_total': s.bends[0].dict['bend duration'] + s.bends[1].dict['bend duration'],
+                'bend_angle_traveled': s.bends[0].dict['angle_change'] + s.bends[1].dict['angle_change'],
+                'bend_dur_total': s.bends[0].dict['bend_dur'] + s.bends[1].dict['bend_dur'],
                 'bend_angular_velocity': s.bends[0].dict['bend_angular_velocity'],
-                'bend_pos': s.bends[0].dict['bend_position']})
-            if s.bends[0].dict['angle change'] < s.bends[1].dict['angle change']:
+                'bend_pos': s.bends[0].dict['bend_pos']})
+            if s.bends[0].dict['angle_change'] < s.bends[1].dict['angle_change']:
                 s.properties['max angle pos'] = 1
         
         elif s.bends_count >= 3:
             
             angles_reached = [s.bends[i].dict['angle end'] for i in range(s.bends_count - 1)]
-            angles_traveled = [s.bends[i].dict['angle change'] for i in range(s.bends_count)]
+            angles_traveled = [s.bends[i].dict['angle_change'] for i in range(s.bends_count)]
             angular_velocitys = [bend.dict['bend_angular_velocity'] for bend in s.bends]
-            durs = [bend.dict['bend duration'] for bend in s.bends]
-            bend_pos = [s.bends[i].dict['bend_position'] for i in range(s.bends_count)]
+            durs = [bend.dict['bend_dur'] for bend in s.bends]
+            bend_pos = [s.bends[i].dict['bend_pos'] for i in range(s.bends_count)]
             
             angle_max = 0
             angle_max_left = 0
@@ -1068,8 +1068,8 @@ for file in os.listdir('.'):
         'step_dur': agg2,
         'coast_dur': agg1,
         'coast_percent': agg2,
-        'current step per second': agg3,
-        'current bend per second': agg3,
+        'current_step_s': agg3,
+        'current_bend_s': agg3,
         'turn_angle': agg2,
         'turn_dur': agg2,
         'turn_angular_velocity': agg2,
