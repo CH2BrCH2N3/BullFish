@@ -18,8 +18,7 @@ default_settings = {
     "save_annotatedvideo": "MJPG",
     "spine_analysis": 1,
     "contour_points_dist": 12,
-    "turn_max": 6000,
-    "show_errors": 1,
+    "turn_max": 100,
     'find_s0': 1,
     "auto_bg": 1,
     "fish_cover_size": 1.5,
@@ -583,9 +582,9 @@ for file in os.listdir('.'):
                 for i in range(l):
                     writer.writerow({'threshold1': threshold1s[i],
                                      'fish_perimeter': fish_perimeters[i]})
-        
-        with open(path + '/' + videoname + '_fish_perimeter2_est.txt', 'w') as f:
-            f.write(str(fish_perimeter2_est))
+        if settings['find_s0']:
+            with open(path + '/' + videoname + '_fish_perimeter2_est.txt', 'w') as f:
+                f.write(str(fish_perimeter2_est))
         
         with open(path + '/' + videoname + '_cen.csv', 'w') as f:
             header = ['centroidX', 'centroidY']
