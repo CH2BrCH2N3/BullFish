@@ -274,7 +274,7 @@ class step:
             'bend_angle_traveled': 0,
             'bend_angular_velocity': 0,
             'bend_dur_total': 0,
-            'bend_wave_frequency': 0,
+            'bend_frequency': 0,
             'bend count': 0,
             'max angle pos': 0}
 
@@ -1055,7 +1055,7 @@ for file in os.listdir('.'):
                 'bend_pos': max(bend_pos),
                 'max angle pos': max_angle_pos})
             
-        s.properties.update({'bend_wave_frequency': s.bends_count / s.properties['bend_dur_total']})
+        s.properties.update({'bend_frequency': s.bends_count / s.properties['bend_dur_total']})
     
     steps_df = pd.DataFrame([s.properties for s in steps])
     steps_df = steps_df[steps_df['bend count'] >= 1]
@@ -1078,7 +1078,7 @@ for file in os.listdir('.'):
         'bend_angle_traveled': agg2,
         'bend_angular_velocity': agg2,
         'bend_dur_total': agg2,
-        'bend_wave_frequency': agg2}
+        'bend_frequency': agg2}
     steps_DF = DF(steps_df, 'step', steps_methods.keys())
     steps_DF.dfs.update({
         'turn left': steps_df[steps_df['turn_laterality'] == 'left'],
