@@ -2,11 +2,35 @@ import pandas as pd
 import scipy.stats
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
-from numpy import nan
 
 df = pd.read_csv('analyses_df_adjusted.csv')
 t = '6OH'
 c = 'veh'
+
+Dict = df.to_dict()
+sw_t = {}
+sw_c = {}
+mwp = {}
+l = len(df)
+for i in range(l):
+    st = []
+    sc = []
+    for name in df.columns:
+        if t in name:
+            st.append(Dict[name][i])
+        if c in name:
+            sc.append(Dict[name][i])
+    st = pd.Series(st)
+    sc = pd.Series(sc)
+    sw_t.update({i: scipy.stats.shapiro(st).pvalue})
+    sw_c.update({i: scipy.stats.shapiro(sc).pvalue})
+    mwp.update({i: scipy.stats.mannwhitneyu(st, sc, method='exact').pvalue})
+Dict.update({
+    f'shapiro_{t}': sw_t,
+    f'shapiro_{c}': sw_c,
+    'MWp': mwp})
+df_new = pd.DataFrame(Dict)
+df_new.to_csv('analyses_df_adjusted.csv', index=False)
 
 def t_test(df, Type):
     dfs = df[(df['Type'] == Type) & (pd.isna(df['Classify'])) & (pd.isna(df['Stratify']))]
@@ -24,6 +48,7 @@ def t_test(df, Type):
         sc = pd.Series(sc)
         test = scipy.stats.ttest_ind(st, sc, equal_var=False)
         ci = test.confidence_interval()
+        _, mwp = scipy.stats.mannwhitneyu(st, sc, method='exact')
         result = {
             'Type': Type,
             'Parameter': s['Parameter'],
@@ -33,11 +58,13 @@ def t_test(df, Type):
             't': test.statistic,
             'low t': ci[0],
             'hi t': ci[1],
-            'p': test.pvalue}
+            'p': test.pvalue,
+            'MWp': mwp}
         results.append(result)
     return pd.DataFrame(results)
 
 t_test_results = pd.DataFrame()
+t_test_results = pd.concat([t_test_results, t_test(df, 'turn')])
 t_test_results = pd.concat([t_test_results, t_test(df, 'bend')])
 t_test_results = pd.concat([t_test_results, t_test(df, 'recoil')])
 t_test_results = pd.concat([t_test_results, t_test(df, 'step')])
@@ -81,7 +108,7 @@ def compare(df, Type, a, b):
         result[t + '_a'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a), 'Value'].mean()
         result[t + '_b'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b), 'Value'].mean()
         result[c + '_a'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a), 'Value'].mean()
-        result[t + '_b'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b), 'Value'].mean()
+        result[c + '_b'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b), 'Value'].mean()
         result['Type'] = Type
         result['Parameter'] = parameter
         result['Method'] = method
@@ -90,9 +117,9 @@ def compare(df, Type, a, b):
     return results
 
 compare_results = pd.DataFrame()
+compare_results = pd.concat([compare_results, compare(df, 'turn', 'turn left', 'turn right')])
 compare_results = pd.concat([compare_results, compare(df, 'bend', 'bend left', 'bend right')])
 compare_results = pd.concat([compare_results, compare(df, 'recoil', 'bend left', 'bend right')])
-compare_results = pd.concat([compare_results, compare(df, 'step', 'HT', 'MT')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'turn left', 'turn right')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'with turn', 'without turn')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'bend left', 'bend right')])
@@ -104,9 +131,10 @@ def stratify(df):
     for i in range(len(dfs)):
         Sl = dfs.iloc[i]
         parameter = Sl['Parameter']
-        if Sl['Stratify'].split(sep='_')[1] != 'low':
+        split = Sl['Stratify'].split(sep='_')
+        if split[len(split) - 1] != 'low':
             continue
-        strat = Sl['Stratify'].split(sep='_')[0]
+        strat = Sl['Stratify'].split(sep='_low')[0]
         Sm = dfs.loc[(dfs['Stratify'] == strat + '_mid') & (dfs['Parameter'] == parameter)]
         Sh = dfs.loc[(dfs['Stratify'] == strat + '_high') & (dfs['Parameter'] == parameter)]
         data = []
@@ -154,20 +182,29 @@ stratify_results = pd.concat([stratify_results, stratify(df)])
 stratify_results.to_csv('stratify_results.csv', index=False)
 
 def threeway(df, a, b):
-    dfa = df[(df['Classify'] == a) & (pd.notna(df['Stratify'])) & (df['Method'] != 'count')]
-    dfb = df[(df['Classify'] == b) & (pd.notna(df['Stratify'])) & (df['Method'] != 'count')]
+    dfa = df[(df['Classify'] == a) & (pd.notna(df['Stratify']))]
+    dfb = df[(df['Classify'] == b) & (pd.notna(df['Stratify']))]
     results = pd.DataFrame()
     for i in range(len(dfa)):
         sal = dfa.iloc[i]
-        parameter = sal['Parameter']
-        if sal['Stratify'].split(sep='_')[1] != 'low':
+        split = sal['Stratify'].split(sep='_')
+        if split[len(split) - 1] != 'low':
             continue
-        strat = sal['Stratify'].split(sep='_')[0]
-        sam = dfa.loc[(dfa['Stratify'] == strat + '_mid') & (dfa['Parameter'] == parameter)]
-        sah = dfa.loc[(dfa['Stratify'] == strat + '_high') & (dfa['Parameter'] == parameter)]
-        sbl = dfb.loc[(dfb['Stratify'] == strat + '_low') & (dfb['Parameter'] == parameter)]
-        sbm = dfb.loc[(dfb['Stratify'] == strat + '_mid') & (dfb['Parameter'] == parameter)]
-        sbh = dfb.loc[(dfb['Stratify'] == strat + '_high') & (dfb['Parameter'] == parameter)]
+        strat = sal['Stratify'].split(sep='_low')[0]
+        if sal['Method'] == 'count':
+            parameter = 'count'
+            sam = dfa.loc[(dfa['Stratify'] == strat + '_mid') & (dfa['Method'] == 'count')]
+            sah = dfa.loc[(dfa['Stratify'] == strat + '_high') & (dfa['Method'] == 'count')]
+            sbl = dfb.loc[(dfb['Stratify'] == strat + '_low') & (dfb['Method'] == 'count')]
+            sbm = dfb.loc[(dfb['Stratify'] == strat + '_mid') & (dfb['Method'] == 'count')]
+            sbh = dfb.loc[(dfb['Stratify'] == strat + '_high') & (dfb['Method'] == 'count')]
+        else:
+            parameter = sal['Parameter']
+            sam = dfa.loc[(dfa['Stratify'] == strat + '_mid') & (dfa['Parameter'] == parameter)]
+            sah = dfa.loc[(dfa['Stratify'] == strat + '_high') & (dfa['Parameter'] == parameter)]
+            sbl = dfb.loc[(dfb['Stratify'] == strat + '_low') & (dfb['Parameter'] == parameter)]
+            sbm = dfb.loc[(dfb['Stratify'] == strat + '_mid') & (dfb['Parameter'] == parameter)]
+            sbh = dfb.loc[(dfb['Stratify'] == strat + '_high') & (dfb['Parameter'] == parameter)]
         data = []
         for name in dfa.columns:
             if t in name:
