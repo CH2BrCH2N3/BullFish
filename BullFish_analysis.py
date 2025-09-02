@@ -26,6 +26,7 @@ default_settings = {
     "min_turn_dur": 0.02,
     "min_max_turn_velocity": 2,
     "min_turn_angle": 0.1,
+    "large_turn": 0.349,
     "bend_cutoff": 2,
     "min_bend_dur": 0.02,
     "min_bend_speed": 2,
@@ -274,8 +275,8 @@ class step:
             'bend_angle_traveled': 0,
             'bend_angular_velocity': 0,
             'bend_dur_total': 0,
-            'bend_wave_frequency': 0,
-            'bend count': 0,
+            'bend_wave_freq': 0,
+            'bend_count': 0,
             'max angle pos': 0}
 
 aggs = {
@@ -304,6 +305,7 @@ class DF:
         self.df = df
         self.Type = Type
         self.params = params # the dictionary of parameters that are dependent variables
+        self.l = len(df)
         self.dfs = {}
         self.intervals = self.df.describe()
     
@@ -333,10 +335,12 @@ class DF:
     
     def stratify1(self, param): # param is the independent variable
         analysis_list = []
-        df = self.df
-        df1 = df[df[param] <= self.intervals.loc['25%'][param]]
-        df2 = df[(df[param] > self.intervals.loc['25%'][param]) & (df[param] < self.intervals.loc['75%'][param])]
-        df3 = df[df[param] >= self.intervals.loc['75%'][param]]
+        df = self.df.copy()
+        df.sort_values(by=[param])
+        l = len(df)
+        df1 = df.iloc[:round(l / 4)]
+        df2 = df.iloc[round(l / 4):round(l * 3 / 4)]
+        df3 = df.iloc[round(l * 3 / 4):l]
         for i in self.params:
             if i == param:
                 continue
@@ -344,57 +348,30 @@ class DF:
             analysis_list.append(result_dict(self.Type, None, param + '_mid', i, 'mean', df2[i].mean()))
             analysis_list.append(result_dict(self.Type, None, param + '_high', i, 'mean', df3[i].mean()))
         return pd.DataFrame(analysis_list)
-    '''
-    def stratify1(self):
+    
+    def stratify2(self, dfnamea, dfnameb, param):
         analysis_list = []
-        df = self.df
+        dfa = self.dfs[dfnamea].copy()
+        dfa.sort_values(by=[param])
+        la = len(dfa)
+        dfa1 = dfa.iloc[:round(la / 4)]
+        dfa2 = dfa.iloc[round(la / 4):round(la * 3 / 4)]
+        dfa3 = dfa.iloc[round(la * 3 / 4):la]
+        dfb = self.dfs[dfnameb].copy()
+        dfb.sort_values(by=[param])
+        lb = len(dfb)
+        dfb1 = dfb.iloc[:round(lb / 4)]
+        dfb2 = dfb.iloc[round(lb / 4):round(lb * 3 / 4)]
+        dfb3 = dfb.iloc[round(lb * 3 / 4):lb]
         for i in self.params:
-            keys = copy(list(self.params))
-            keys.remove(i)
-            df1 = df.loc[df[i] <= self.intervals.loc['25%'][i], keys]
-            df2 = df.loc[(df[i] > self.intervals.loc['25%'][i]) & (df[i] < self.intervals.loc['75%'][i]), keys]
-            df3 = df.loc[df[i] >= self.intervals.loc['75%'][i], keys]
-            df1_mean = df1.mean(numeric_only=True)
-            df2_mean = df2.mean(numeric_only=True)
-            df3_mean = df3.mean(numeric_only=True)
-            for j in keys:
-                analysis_list.append(result_dict(self.Type, None, i + '_low', j, 'mean', df1_mean.at[j]))
-                analysis_list.append(result_dict(self.Type, None, i + '_mid', j, 'mean', df2_mean.at[j]))
-                analysis_list.append(result_dict(self.Type, None, i + '_high', j, 'mean', df3_mean.at[j]))
-        return pd.DataFrame(analysis_list)
-    '''
-    def stratify2(self, dfnamea, dfnameb):
-        analysis_list = []
-        dfa = self.dfs[dfnamea]
-        dfb = self.dfs[dfnameb]
-        for i in self.params:
-            keys = copy(list(self.params))
-            keys.remove(i)
-            dfa1 = dfa.loc[dfa[i] <= self.intervals.loc['25%'][i], keys]
-            dfa2 = dfa.loc[(dfa[i] > self.intervals.loc['25%'][i]) & (dfa[i] < self.intervals.loc['75%'][i]), keys]
-            dfa3 = dfa.loc[dfa[i] >= self.intervals.loc['75%'][i], keys]
-            dfa1_mean = dfa1.mean(numeric_only=True)
-            dfa2_mean = dfa2.mean(numeric_only=True)
-            dfa3_mean = dfa3.mean(numeric_only=True)
-            dfb1 = dfb.loc[dfb[i] <= self.intervals.loc['25%'][i], keys]
-            dfb2 = dfb.loc[(dfb[i] > self.intervals.loc['25%'][i]) & (dfb[i] < self.intervals.loc['75%'][i]), keys]
-            dfb3 = dfb.loc[dfb[i] >= self.intervals.loc['75%'][i], keys]
-            dfb1_mean = dfb1.mean(numeric_only=True)
-            dfb2_mean = dfb2.mean(numeric_only=True)
-            dfb3_mean = dfb3.mean(numeric_only=True)
-            for j in keys:
-                analysis_list.append(result_dict(self.Type, dfnamea, i + '_low', j, 'mean', dfa1_mean.at[j]))
-                analysis_list.append(result_dict(self.Type, dfnamea, i + '_mid', j, 'mean', dfa2_mean.at[j]))
-                analysis_list.append(result_dict(self.Type, dfnamea, i + '_high', j, 'mean', dfa3_mean.at[j]))
-                analysis_list.append(result_dict(self.Type, dfnameb, i + '_low', j, 'mean', dfb1_mean.at[j]))
-                analysis_list.append(result_dict(self.Type, dfnameb, i + '_mid', j, 'mean', dfb2_mean.at[j]))
-                analysis_list.append(result_dict(self.Type, dfnameb, i + '_high', j, 'mean', dfb3_mean.at[j]))
-            analysis_list.append(result_dict(self.Type, dfnamea, i + '_low', None, 'count', len(dfa1)))
-            analysis_list.append(result_dict(self.Type, dfnamea, i + '_mid', None, 'count', len(dfa2)))
-            analysis_list.append(result_dict(self.Type, dfnamea, i + '_high', None, 'count', len(dfa3)))
-            analysis_list.append(result_dict(self.Type, dfnameb, i + '_low', None, 'count', len(dfb1)))
-            analysis_list.append(result_dict(self.Type, dfnameb, i + '_mid', None, 'count', len(dfb2)))
-            analysis_list.append(result_dict(self.Type, dfnameb, i + '_high', None, 'count', len(dfb3)))
+            if i == param:
+                continue
+            analysis_list.append(result_dict(self.Type, dfnamea, param + '_low', i, 'mean', dfa1[i].mean()))
+            analysis_list.append(result_dict(self.Type, dfnameb, param + '_low', i, 'mean', dfb1[i].mean()))
+            analysis_list.append(result_dict(self.Type, dfnamea, param + '_mid', i, 'mean', dfa2[i].mean()))
+            analysis_list.append(result_dict(self.Type, dfnameb, param + '_mid', i, 'mean', dfb2[i].mean()))
+            analysis_list.append(result_dict(self.Type, dfnamea, param + '_high', i, 'mean', dfa3[i].mean()))
+            analysis_list.append(result_dict(self.Type, dfnameb, param + '_high', i, 'mean', dfb3[i].mean()))
         return pd.DataFrame(analysis_list)
 
 class results_df:
@@ -944,7 +921,7 @@ for file in os.listdir('.'):
         
         s.turns_count = len(s.turns)
         s.bends_count = len(s.bends)
-        s.properties['bend count'] = s.bends_count
+        s.properties['bend_count'] = s.bends_count
         
     for s in steps:
         
@@ -970,10 +947,10 @@ for file in os.listdir('.'):
             turn_angle_overall = fdirs.list[s.turns[s.turns_count - 1].endpos] - fdirs.list[s.turns[0].startpos]
             s.properties.update({'turn_angle': abs(turn_angle_overall)})
             
-            if abs(turn_angle_overall) >= settings['min_turn_angle']:
-                if turn_angle_overall > settings['min_turn_angle']:
+            if abs(turn_angle_overall) >= settings['large_turn']:
+                if turn_angle_overall > settings['large_turn']:
                     s.properties.update({'turn_laterality': 'right'})
-                elif turn_angle_overall < -settings['min_turn_angle']:
+                elif turn_angle_overall < -settings['large_turn']:
                     s.properties.update({'turn_laterality': 'left'})
                 s.properties.update({
                     'turn_dur': turns_durs[turns_angles.index(max(turns_angles))],
@@ -1055,10 +1032,10 @@ for file in os.listdir('.'):
                 'bend_pos': max(bend_pos),
                 'max angle pos': max_angle_pos})
             
-        s.properties.update({'bend_wave_frequency': s.bends_count / s.properties['bend_dur_total']})
+        s.properties.update({'bend_wave_freq': s.bends_count / s.properties['bend_dur_total']})
     
     steps_df = pd.DataFrame([s.properties for s in steps])
-    steps_df = steps_df[steps_df['bend count'] >= 1]
+    steps_df = steps_df[steps_df['bend_count'] >= 1]
     steps_methods = {
         'step_length': agg2,
         'speed_change': agg1,
@@ -1073,12 +1050,13 @@ for file in os.listdir('.'):
         'turn_angle': agg2,
         'turn_dur': agg2,
         'turn_angular_velocity': agg2,
+        'bend_count': agg2,
         'bend_angle_reached': agg2,
         'bend_pos': agg2,
         'bend_angle_traveled': agg2,
         'bend_angular_velocity': agg2,
         'bend_dur_total': agg2,
-        'bend_wave_frequency': agg2}
+        'bend_wave_freq': agg2}
     steps_DF = DF(steps_df, 'step', steps_methods.keys())
     steps_DF.dfs.update({
         'turn left': steps_df[steps_df['turn_laterality'] == 'left'],
@@ -1098,9 +1076,10 @@ for file in os.listdir('.'):
     
     for i in steps_methods:
         analysis_df.add(steps_DF.stratify1(i))
-    analysis_df.add(steps_DF.stratify2('turn left', 'turn right'))
-    analysis_df.add(steps_DF.stratify2('with turn', 'without turn'))
-    analysis_df.add(steps_DF.stratify2('bend left', 'bend right'))
+    for i in steps_methods:
+        analysis_df.add(steps_DF.stratify2('turn left', 'turn right', i))
+        analysis_df.add(steps_DF.stratify2('with turn', 'without turn', i))
+        analysis_df.add(steps_DF.stratify2('bend left', 'bend right', i))
     
     speeds_df.to_csv(path + '/' + videoname + '_accelerations_df.csv', index=False)
     fdirs_df.to_csv(path + '/' + videoname + '_turns_df.csv', index=False)
