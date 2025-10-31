@@ -1,7 +1,5 @@
 import pandas as pd
 import scipy.stats
-import statsmodels.api as sm
-from statsmodels.formula.api import ols
 
 df = pd.read_csv('analyses_df_adjusted.csv')
 t = '6OH'
@@ -30,7 +28,7 @@ Dict.update({
     f'shapiro_{c}': sw_c,
     'MWp': mwp})
 df_new = pd.DataFrame(Dict)
-df_new.to_csv('analyses_df_adjusted.csv', index=False)
+df_new.to_csv('analyses_df_adjusted_stats.csv', index=False)
 
 def t_test(df, Type):
     dfs = df[(df['Type'] == Type) & (pd.isna(df['Classify'])) & (pd.isna(df['Stratify']))]
@@ -70,11 +68,17 @@ t_test_results = pd.concat([t_test_results, t_test(df, 'recoil')])
 t_test_results = pd.concat([t_test_results, t_test(df, 'step')])
 t_test_results.to_csv('t_test_results.csv', index=False)
 
+def ai(a, b):
+    return (a - b) / (a + b)
+
 def compare(df, Type, a, b):
+    
     dfa = df[(df['Type'] == Type) & (df['Classify'] == a) & (pd.isna(df['Stratify']))]
     dfb = df[(df['Type'] == Type) & (df['Classify'] == b) & (pd.isna(df['Stratify']))]
-    results = pd.DataFrame()
+    results = []
+    
     for i in range(len(dfa)):
+        
         sa = dfa.iloc[i]
         parameter = sa['Parameter']
         method = sa['Method']
@@ -82,39 +86,41 @@ def compare(df, Type, a, b):
             sb = dfb.loc[dfb['Method'] == 'count']
         else:
             sb = dfb.loc[(dfb['Parameter'] == parameter) & (dfb['Method'] == method)]
-        data = []
+        result = {
+            'Type': Type,
+            'Classify': a + '_vs_' + b,
+            'Parameter': sa['Parameter'],
+            'Method': sa['Method']}
+        
+        ait = []
+        aic = []
         for name in dfa.columns:
             if t in name:
-                data.append({'Value': sa[name],
-                             'Treatment': t,
-                             'Group': a})
-                data.append({'Value': sb[name].iloc[0],
-                             'Treatment': t,
-                             'Group': b})
+                value = ai(sa[name], sb[name].iloc[0])
+                ait.append(value)
+                result.update({name: value})
             if c in name:
-                data.append({'Value': sa[name],
-                             'Treatment': c,
-                             'Group': a})
-                data.append({'Value': sb[name].iloc[0],
-                             'Treatment': c,
-                             'Group': b})
-        data = pd.DataFrame(data)
-        if data.isnull().values.any():
-            continue
-        model = ols('Value ~ C(Treatment) * C(Group)', data=data).fit()
-        anova_table = sm.stats.anova_lm(model, typ=2)
-        result = anova_table['PR(>F)'].T
-        result.pop('Residual')
-        result[t + '_a'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a), 'Value'].mean()
-        result[t + '_b'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b), 'Value'].mean()
-        result[c + '_a'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a), 'Value'].mean()
-        result[c + '_b'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b), 'Value'].mean()
-        result['Type'] = Type
-        result['Parameter'] = parameter
-        result['Method'] = method
-        result['Group'] = a + ' vs ' + b
-        results = pd.concat([results, pd.DataFrame(result).T])
-    return results
+                value = ai(sa[name], sb[name].iloc[0])
+                aic.append(value)
+                result.update({name: value})
+        
+        ait = pd.Series(ait)
+        aic = pd.Series(aic)
+        test = scipy.stats.ttest_ind(ait, aic, equal_var=False)
+        ci = test.confidence_interval()
+        _, mwp = scipy.stats.mannwhitneyu(ait, aic, method='exact')
+        result.update({
+            t + '_mean': ait.mean(),
+            c + '_mean': aic.mean(),
+            't': test.statistic,
+            'low t': ci[0],
+            'hi t': ci[1],
+            'p': test.pvalue,
+            'MWp': mwp})
+        
+        results.append(result)
+    
+    return pd.DataFrame(results)
 
 compare_results = pd.DataFrame()
 compare_results = pd.concat([compare_results, compare(df, 'turn', 'turn left', 'turn right')])
@@ -122,70 +128,16 @@ compare_results = pd.concat([compare_results, compare(df, 'bend', 'bend left', '
 compare_results = pd.concat([compare_results, compare(df, 'recoil', 'bend left', 'bend right')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'turn left', 'turn right')])
 compare_results = pd.concat([compare_results, compare(df, 'step', 'with turn', 'without turn')])
-compare_results = pd.concat([compare_results, compare(df, 'step', 'bend left', 'bend right')])
 compare_results.to_csv('compare_results.csv', index=False)
 
-def stratify(df):
-    dfs = df[(pd.isna(df['Classify'])) & (pd.notna(df['Stratify']))]
-    results = pd.DataFrame()
-    for i in range(len(dfs)):
-        Sl = dfs.iloc[i]
-        parameter = Sl['Parameter']
-        split = Sl['Stratify'].split(sep='_')
-        if split[len(split) - 1] != 'low':
-            continue
-        strat = Sl['Stratify'].split(sep='_low')[0]
-        Sm = dfs.loc[(dfs['Stratify'] == strat + '_mid') & (dfs['Parameter'] == parameter)]
-        Sh = dfs.loc[(dfs['Stratify'] == strat + '_high') & (dfs['Parameter'] == parameter)]
-        data = []
-        for name in dfs.columns:
-            if t in name:
-                data.append({'Value': Sl[name],
-                             'Treatment': t,
-                             'Stratify': Sl['Stratify']})
-                data.append({'Value': Sm[name].iloc[0],
-                             'Treatment': t,
-                             'Stratify': Sm['Stratify'].iloc[0]})
-                data.append({'Value': Sh[name].iloc[0],
-                             'Treatment': t,
-                             'Stratify': Sh['Stratify'].iloc[0]})
-            if c in name:
-                data.append({'Value': Sl[name],
-                             'Treatment': c,
-                             'Stratify': Sl['Stratify']})
-                data.append({'Value': Sm[name].iloc[0],
-                             'Treatment': c,
-                             'Stratify': Sm['Stratify'].iloc[0]})
-                data.append({'Value': Sh[name].iloc[0],
-                             'Treatment': c,
-                             'Stratify': Sh['Stratify'].iloc[0]})
-        data = pd.DataFrame(data)
-        if data.isnull().values.any():
-            continue
-        model = ols('Value ~ C(Treatment) * C(Stratify)', data=data).fit()
-        anova_table = sm.stats.anova_lm(model, typ=2)
-        result = anova_table['PR(>F)'].T
-        result.pop('Residual')
-        result[t + '_l'] = data.loc[(data['Treatment'] == t) & (data['Stratify'] == Sl['Stratify']), 'Value'].mean()
-        result[t + '_m'] = data.loc[(data['Treatment'] == t) & (data['Stratify'] == Sm['Stratify'].iloc[0]), 'Value'].mean()
-        result[t + '_h'] = data.loc[(data['Treatment'] == t) & (data['Stratify'] == Sh['Stratify'].iloc[0]), 'Value'].mean()
-        result[c + '_l'] = data.loc[(data['Treatment'] == c) & (data['Stratify'] == Sl['Stratify']), 'Value'].mean()
-        result[c + '_m'] = data.loc[(data['Treatment'] == c) & (data['Stratify'] == Sm['Stratify'].iloc[0]), 'Value'].mean()
-        result[c + '_h'] = data.loc[(data['Treatment'] == c) & (data['Stratify'] == Sh['Stratify'].iloc[0]), 'Value'].mean()
-        result['Parameter'] = parameter
-        result['Stratify'] = strat
-        results = pd.concat([results, pd.DataFrame(result).T])
-    return results
-
-stratify_results = pd.DataFrame()
-stratify_results = pd.concat([stratify_results, stratify(df)])
-stratify_results.to_csv('stratify_results.csv', index=False)
-
-def threeway(df, a, b):
-    dfa = df[(df['Classify'] == a) & (pd.notna(df['Stratify']))]
-    dfb = df[(df['Classify'] == b) & (pd.notna(df['Stratify']))]
-    results = pd.DataFrame()
+def threeway(df, Type, a, b):
+    
+    dfa = df[(df['Type'] == Type) & (df['Classify'] == a) & (pd.notna(df['Stratify']))]
+    dfb = df[(df['Type'] == Type) & (df['Classify'] == b) & (pd.notna(df['Stratify']))]
+    results = []
+    
     for i in range(len(dfa)):
+        
         sal = dfa.iloc[i]
         split = sal['Stratify'].split(sep='_')
         if split[len(split) - 1] != 'low':
@@ -205,85 +157,101 @@ def threeway(df, a, b):
             sbl = dfb.loc[(dfb['Stratify'] == strat + '_low') & (dfb['Parameter'] == parameter)]
             sbm = dfb.loc[(dfb['Stratify'] == strat + '_mid') & (dfb['Parameter'] == parameter)]
             sbh = dfb.loc[(dfb['Stratify'] == strat + '_high') & (dfb['Parameter'] == parameter)]
-        data = []
+        result = {
+            'Type': Type,
+            'Parameter': parameter,
+            'Classify': a + '_vs_' + b}
+        
+        resultl = result.copy()
+        aitl = []
+        aicl = []
         for name in dfa.columns:
             if t in name:
-                data.append({'Value': sal[name],
-                             'Treatment': t,
-                             'Group': a,
-                             'Stratify': sal['Stratify']})
-                data.append({'Value': sam[name].iloc[0],
-                             'Treatment': t,
-                             'Group': a,
-                             'Stratify': sam['Stratify'].iloc[0]})
-                data.append({'Value': sah[name].iloc[0],
-                             'Treatment': t,
-                             'Group': a,
-                             'Stratify': sah['Stratify'].iloc[0]})
-                data.append({'Value': sbl[name].iloc[0],
-                             'Treatment': t,
-                             'Group': b,
-                             'Stratify': sbl['Stratify'].iloc[0]})
-                data.append({'Value': sbm[name].iloc[0],
-                             'Treatment': t,
-                             'Group': b,
-                             'Stratify': sbm['Stratify'].iloc[0]})
-                data.append({'Value': sbh[name].iloc[0],
-                             'Treatment': t,
-                             'Group': b,
-                             'Stratify': sbh['Stratify'].iloc[0]})
+                value = ai(sal[name], sbl[name].iloc[0])
+                aitl.append(value)
+                resultl.update({name: value})
             if c in name:
-                data.append({'Value': sal[name],
-                             'Treatment': c,
-                             'Group': a,
-                             'Stratify': sal['Stratify']})
-                data.append({'Value': sam[name].iloc[0],
-                             'Treatment': c,
-                             'Group': a,
-                             'Stratify': sam['Stratify'].iloc[0]})
-                data.append({'Value': sah[name].iloc[0],
-                             'Treatment': c,
-                             'Group': a,
-                             'Stratify': sah['Stratify'].iloc[0]})
-                data.append({'Value': sbl[name].iloc[0],
-                             'Treatment': c,
-                             'Group': b,
-                             'Stratify': sbl['Stratify'].iloc[0]})
-                data.append({'Value': sbm[name].iloc[0],
-                             'Treatment': c,
-                             'Group': b,
-                             'Stratify': sbm['Stratify'].iloc[0]})
-                data.append({'Value': sbh[name].iloc[0],
-                             'Treatment': c,
-                             'Group': b,
-                             'Stratify': sbh['Stratify'].iloc[0]})
-        data = pd.DataFrame(data)
-        if data.isnull().values.any():
-            continue
-        model = ols('Value ~ C(Treatment) * C(Group) * C(Stratify)', data=data).fit()
-        anova_table = sm.stats.anova_lm(model, typ=3)
-        result = anova_table['PR(>F)'].T
-        result.pop('Residual')
-        result[t + '_a_l'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a) & (data['Stratify'] == sal['Stratify']), 'Value'].mean()
-        result[t + '_a_m'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a) & (data['Stratify'] == sam['Stratify'].iloc[0]), 'Value'].mean()
-        result[t + '_a_h'] = data.loc[(data['Treatment'] == t) & (data['Group'] == a) & (data['Stratify'] == sah['Stratify'].iloc[0]), 'Value'].mean()
-        result[t + '_b_l'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b) & (data['Stratify'] == sbl['Stratify'].iloc[0]), 'Value'].mean()
-        result[t + '_b_m'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b) & (data['Stratify'] == sbm['Stratify'].iloc[0]), 'Value'].mean()
-        result[t + '_b_h'] = data.loc[(data['Treatment'] == t) & (data['Group'] == b) & (data['Stratify'] == sbh['Stratify'].iloc[0]), 'Value'].mean()
-        result[c + '_a_l'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a) & (data['Stratify'] == sal['Stratify']), 'Value'].mean()
-        result[c + '_a_m'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a) & (data['Stratify'] == sam['Stratify'].iloc[0]), 'Value'].mean()
-        result[c + '_a_h'] = data.loc[(data['Treatment'] == c) & (data['Group'] == a) & (data['Stratify'] == sah['Stratify'].iloc[0]), 'Value'].mean()
-        result[c + '_b_l'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b) & (data['Stratify'] == sbl['Stratify'].iloc[0]), 'Value'].mean()
-        result[c + '_b_m'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b) & (data['Stratify'] == sbm['Stratify'].iloc[0]), 'Value'].mean()
-        result[c + '_b_h'] = data.loc[(data['Treatment'] == c) & (data['Group'] == b) & (data['Stratify'] == sbh['Stratify'].iloc[0]), 'Value'].mean()
-        result['Parameter'] = parameter
-        result['Group'] = a + ' vs ' + b
-        result['Stratify'] = strat
-        results = pd.concat([results, pd.DataFrame(result).T])
-    return results
+                value = ai(sal[name], sbl[name].iloc[0])
+                aicl.append(value)
+                resultl.update({name: value})
+        aitl = pd.Series(aitl)
+        aicl = pd.Series(aicl)
+        test = scipy.stats.ttest_ind(aitl, aicl, equal_var=False)
+        ci = test.confidence_interval()
+        _, mwp = scipy.stats.mannwhitneyu(aitl, aicl, method='exact')
+        resultl.update({
+            'Stratify': strat + '_low',
+            t + '_mean': aitl.mean(),
+            c + '_mean': aicl.mean(),
+            't': test.statistic,
+            'low t': ci[0],
+            'hi t': ci[1],
+            'p': test.pvalue,
+            'MWp': mwp})
+        results.append(resultl)
+        
+        resultm = result.copy()
+        aitm = []
+        aicm = []
+        for name in dfa.columns:
+            if t in name:
+                value = ai(sam[name].iloc[0], sbm[name].iloc[0])
+                aitm.append(value)
+                resultm.update({name: value})
+            if c in name:
+                value = ai(sam[name].iloc[0], sbm[name].iloc[0])
+                aicm.append(value)
+                resultm.update({name: value})
+        aitm = pd.Series(aitm)
+        aicm = pd.Series(aicm)
+        test = scipy.stats.ttest_ind(aitm, aicm, equal_var=False)
+        ci = test.confidence_interval()
+        _, mwp = scipy.stats.mannwhitneyu(aitm, aicm, method='exact')
+        resultm.update({
+            'Stratify': strat + '_mid',
+            t + '_mean': aitm.mean(),
+            c + '_mean': aicm.mean(),
+            't': test.statistic,
+            'low t': ci[0],
+            'hi t': ci[1],
+            'p': test.pvalue,
+            'MWp': mwp})
+        results.append(resultm)
+        
+        resulth = result.copy()
+        aith = []
+        aich = []
+        for name in dfa.columns:
+            if t in name:
+                value = ai(sah[name].iloc[0], sbh[name].iloc[0])
+                aith.append(value)
+                resulth.update({name: value})
+            if c in name:
+                value = ai(sah[name].iloc[0], sbh[name].iloc[0])
+                aich.append(value)
+                resulth.update({name: value})
+        aith = pd.Series(aith)
+        aich = pd.Series(aich)
+        test = scipy.stats.ttest_ind(aith, aich, equal_var=False)
+        ci = test.confidence_interval()
+        _, mwp = scipy.stats.mannwhitneyu(aith, aich, method='exact')
+        resulth.update({
+            'Stratify': strat + '_high',
+            t + '_mean': aith.mean(),
+            c + '_mean': aich.mean(),
+            't': test.statistic,
+            'low t': ci[0],
+            'hi t': ci[1],
+            'p': test.pvalue,
+            'MWp': mwp})
+        results.append(resulth)
+        
+    return pd.DataFrame(results)
 
 threeway_results = pd.DataFrame()
-threeway_results = pd.concat([threeway_results, threeway(df, 'turn left', 'turn right')])
-threeway_results = pd.concat([threeway_results, threeway(df, 'with turn', 'without turn')])
-threeway_results = pd.concat([threeway_results, threeway(df, 'bend left', 'bend right')])
+threeway_results = pd.concat([threeway_results, threeway(df, 'turn', 'turn left', 'turn right')])
+threeway_results = pd.concat([threeway_results, threeway(df, 'bend', 'bend left', 'bend right')])
+threeway_results = pd.concat([threeway_results, threeway(df, 'recoil', 'bend left', 'bend right')])
+threeway_results = pd.concat([threeway_results, threeway(df, 'step', 'turn left', 'turn right')])
+threeway_results = pd.concat([threeway_results, threeway(df, 'step', 'with turn', 'without turn')])
 threeway_results.to_csv('threeway_results.csv', index=False)
