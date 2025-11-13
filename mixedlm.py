@@ -34,19 +34,25 @@ for param in params:
     p.append({
         'Param': param,
         'Stratify': 'low speed',
-        'p': result.pvalues.iloc[1]})
+        'p': result.pvalues.iloc[1],
+        'Control mean': result.params.iloc[0],
+        'Difference from control': result.params.iloc[1]})
     model = smf.mixedlm(f'{param} ~ Treatment', df2, groups=df2['video'])
     result = model.fit()
     p.append({
         'Param': param,
         'Stratify': 'mid speed',
-        'p': result.pvalues.iloc[1]})
+        'p': result.pvalues.iloc[1],
+        'Control mean': result.params.iloc[0],
+        'Difference from control': result.params.iloc[1]})
     model = smf.mixedlm(f'{param} ~ Treatment', df3, groups=df3['video'])
     result = model.fit()
     p.append({
         'Param': param,
         'Stratify': 'high speed',
-        'p': result.pvalues.iloc[1]})
+        'p': result.pvalues.iloc[1],
+        'Control mean': result.params.iloc[0],
+        'Difference from control': result.params.iloc[1]})
 p = pd.DataFrame(p)
 p.to_csv('Turns_Stratified_mixedlm.csv', index=False)
 
@@ -83,19 +89,25 @@ for param in params:
     p.append({
         'Param': param,
         'Stratify': 'low speed',
-        'p': result.pvalues.iloc[1]})
+        'p': result.pvalues.iloc[1],
+        'Control mean': result.params.iloc[0],
+        'Difference from control': result.params.iloc[1]})
     model = smf.mixedlm(f'{param} ~ Treatment', df2, groups=df2['video'])
     result = model.fit()
     p.append({
         'Param': param,
         'Stratify': 'mid speed',
-        'p': result.pvalues.iloc[1]})
+        'p': result.pvalues.iloc[1],
+        'Control mean': result.params.iloc[0],
+        'Difference from control': result.params.iloc[1]})
     model = smf.mixedlm(f'{param} ~ Treatment', df3, groups=df3['video'])
     result = model.fit()
     p.append({
         'Param': param,
         'Stratify': 'high speed',
-        'p': result.pvalues.iloc[1]})
+        'p': result.pvalues.iloc[1],
+        'Control mean': result.params.iloc[0],
+        'Difference from control': result.params.iloc[1]})
 p = pd.DataFrame(p)
 p.to_csv('bends_Stratified_mixedlm.csv', index=False)
 
@@ -158,7 +170,9 @@ with open('Results_stratified.txt', 'w') as f:
             p.append({
                 'Param': param,
                 'Stratify': f'low {i}',
-                'p': result.pvalues.iloc[1]})
+                'p': result.pvalues.iloc[1],
+                'Control mean': result.params.iloc[0],
+                'Difference from control': result.params.iloc[1]})
             model = smf.mixedlm(f'{param} ~ Treatment', df2, groups=df2['video'])
             result = model.fit()
             f.write(f'\n{param}, mid {i}\n')
@@ -166,7 +180,9 @@ with open('Results_stratified.txt', 'w') as f:
             p.append({
                 'Param': param,
                 'Stratify': f'mid {i}',
-                'p': result.pvalues.iloc[1]})
+                'p': result.pvalues.iloc[1],
+                'Control mean': result.params.iloc[0],
+                'Difference from control': result.params.iloc[1]})
             model = smf.mixedlm(f'{param} ~ Treatment', df3, groups=df3['video'])
             result = model.fit()
             f.write(f'\n{param}, high {i}\n')
@@ -174,6 +190,8 @@ with open('Results_stratified.txt', 'w') as f:
             p.append({
                 'Param': param,
                 'Stratify': f'high {i}',
-                'p': result.pvalues.iloc[1]})
+                'p': result.pvalues.iloc[1],
+                'Control mean': result.params.iloc[0],
+                'Difference from control': result.params.iloc[1]})
 p = pd.DataFrame(p)
 p.to_csv('mixedlm.csv', index=False)
