@@ -2,8 +2,8 @@ import pandas as pd
 import scipy.stats
 
 df = pd.read_csv('analyses_df_adjusted.csv')
-t = '6OH'
-c = 'veh'
+t = 'A152T'
+c = 'WT'
 
 Dict = df.to_dict()
 sw_t = {}
