@@ -1,4 +1,6 @@
+import numpy as np
 import cv2 as cv
+from math import log10
 
 def get_rm(x, y, angle):
     if angle > -180 and angle < -135:
@@ -56,3 +58,54 @@ def frame_blur(frame, ksize):
         return cv.GaussianBlur(frame, (ksize, ksize), 0)
     else:
         return frame.copy()
+
+def max_entropy_threshold(image, threshold_reduction):
+    hist, _ = np.histogram(image.ravel(), bins = 256, range=(0, 256))
+    nhist = hist / hist.sum()
+    pT = np.zeros(256)
+    ii = 1
+    while ii <= 255:
+        pT[ii] = pT[ii - 1] + nhist[ii]
+        ii += 1
+    hB = np.zeros(256)
+    hW = np.zeros(256)
+    t = 0
+    while t <= 255:
+        if pT[t] > 0:
+            hhB = 0
+            ii = 0
+            while ii <= t:
+                if nhist[ii] > 0:
+                    temp = nhist[ii] / pT[t]
+                    hhB -= temp * log10(temp)
+                ii += 1
+            hB[t] = hhB
+        pTW = 1 - pT[t]
+        if pTW > 0:
+            hhW = 0
+            ii = t + 1
+            while ii <= 255:
+                if nhist[ii] > 0:
+                    temp = nhist[ii] / pTW
+                    hhW -= temp * log10(temp)
+                ii += 1
+            hW[t] = hhW
+        t += 1
+    hmax = hB[0] + hW[0]
+    tmax = 0
+    t = 1
+    while t <= 255:
+        h = hB[t] + hW[t]
+        if h > hmax:
+            hmax = h
+            tmax = t
+        t += 1
+    return round(tmax * (1 - threshold_reduction / 100))
+
+def sq_area(image, point, r):
+    sq = image[(point[1] - r):(point[1] + r + 1), (point[0] - r):(point[0] + r + 1)]
+    try:
+        return np.sum(sq == 255)
+    except:
+        print('\nThe edge of the video is reached. Tracking might not be accurate.')
+        return 99999
