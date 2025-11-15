@@ -197,6 +197,7 @@ while True:
             "save_annotatedvideo": "MJPG",
             "spine_analysis": 1,
             "spine_points": 10,
+            'fast_s1': 0,
             "turn_max": 100,
             'find_s0': 0,
             "auto_bg": 1,
@@ -496,48 +497,57 @@ while True:
                         if settings['spine_analysis']:
                             
                             sq_length = round(4 + cv.contourArea(fish_contour1) / 300)
-                            
-                            spacing = round(fish_perimeter1 / spine_len / 2)
-                            contour1_points_sq = np.zeros((fish_perimeter1 - 1) // spacing, dtype=np.int32)
-                            for ii in range(len(contour1_points_sq)):
-                                point = (fish_contour1[ii * spacing, 0, 0], fish_contour1[ii * spacing, 0, 1])
-                                contour1_points_sq[ii] = sq_area(s1frame, point, sq_length)
-                            s1_index_t = np.argmin(contour1_points_sq)
                             s1_index = 0
                             min_fish_area = 99999999
-                            if s1_index_t == 0:
-                                for ii in range(0, spacing):
-                                    point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
-                                    fish_area = sq_area(s1frame, point, sq_length)
-                                    if fish_area < min_fish_area:
-                                        s1_index = ii
-                                        min_fish_area = fish_area
-                                for ii in range(fish_perimeter1 - spacing, fish_perimeter1):
-                                    point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
-                                    fish_area = sq_area(s1frame, point, sq_length)
-                                    if fish_area < min_fish_area:
-                                        s1_index = ii
-                                        min_fish_area = fish_area
-                            elif s1_index_t == fish_perimeter1 // spacing:
-                                for ii in range(fish_perimeter1 - spacing - fish_perimeter1 % spacing, fish_perimeter1):
-                                    point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
-                                    fish_area = sq_area(s1frame, point, sq_length)
-                                    if fish_area < min_fish_area:
-                                        s1_index = ii
-                                        min_fish_area = fish_area
-                                for ii in range(0, spacing):
-                                    point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
-                                    fish_area = sq_area(s1frame, point, sq_length)
-                                    if fish_area < min_fish_area:
-                                        s1_index = ii
-                                        min_fish_area = fish_area
+                            
+                            if settings['fast_s1']:
+                                spacing = round(fish_perimeter1 / settings['fast_s1'])
+                                contour1_points_sq = np.zeros((fish_perimeter1 - 1) // spacing, dtype=np.int32)
+                                for ii in range(len(contour1_points_sq)):
+                                    point = (fish_contour1[ii * spacing, 0, 0], fish_contour1[ii * spacing, 0, 1])
+                                    contour1_points_sq[ii] = sq_area(s1frame, point, sq_length)
+                                s1_index_t = np.argmin(contour1_points_sq)
+                                if s1_index_t == 0:
+                                    for ii in range(0, spacing):
+                                        point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
+                                        fish_area = sq_area(s1frame, point, sq_length)
+                                        if fish_area < min_fish_area:
+                                            s1_index = ii
+                                            min_fish_area = fish_area
+                                    for ii in range(fish_perimeter1 - spacing, fish_perimeter1):
+                                        point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
+                                        fish_area = sq_area(s1frame, point, sq_length)
+                                        if fish_area < min_fish_area:
+                                            s1_index = ii
+                                            min_fish_area = fish_area
+                                elif s1_index_t == fish_perimeter1 // spacing:
+                                    for ii in range(fish_perimeter1 - spacing - fish_perimeter1 % spacing, fish_perimeter1):
+                                        point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
+                                        fish_area = sq_area(s1frame, point, sq_length)
+                                        if fish_area < min_fish_area:
+                                            s1_index = ii
+                                            min_fish_area = fish_area
+                                    for ii in range(0, spacing):
+                                        point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
+                                        fish_area = sq_area(s1frame, point, sq_length)
+                                        if fish_area < min_fish_area:
+                                            s1_index = ii
+                                            min_fish_area = fish_area
+                                else:
+                                    for ii in range((s1_index_t - 1) * spacing, (s1_index_t + 1) * spacing):
+                                        point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
+                                        fish_area = sq_area(s1frame, point, sq_length)
+                                        if fish_area < min_fish_area:
+                                            s1_index = ii
+                                            min_fish_area = fish_area
                             else:
-                                for ii in range((s1_index_t - 1) * spacing, (s1_index_t + 1) * spacing):
+                                contour1_points_sq = np.zeros(fish_perimeter1, dtype=np.int32)
+                                for ii in range(fish_perimeter1):
                                     point = (fish_contour1[ii, 0, 0], fish_contour1[ii, 0, 1])
-                                    fish_area = sq_area(s1frame, point, sq_length)
-                                    if fish_area < min_fish_area:
+                                    contour1_points_sq[ii] = sq_area(s1frame, point, sq_length)
+                                    if contour1_points_sq[ii] < min_fish_area:
                                         s1_index = ii
-                                        min_fish_area = fish_area
+                                        min_fish_area = contour1_points_sq[ii]
                             
                             fish_contour1_points = np.zeros((fish_perimeter1, 2), dtype=np.int32)    
                             jj = s1_index
@@ -717,7 +727,7 @@ while True:
                         f.write(str(word) + ',')
                     f.write('\n')
                     for i in range(l):
-                        row = [cen[i][0], cen[i][1]]
+                        row = [cen[i, 0], cen[i, 1]]
                         for cell in row:
                             f.write(str(cell) + ',')
                         f.write('\n')
@@ -1017,7 +1027,6 @@ while True:
             errors_all.update({videoname: error2_count})
             
             if settings['correct_errors']:
-                print('Corrected frames:')
                 ii = 0
                 while ii < error2_count:
                     i = error2_frames[ii]
@@ -1033,17 +1042,11 @@ while True:
                                             spines[i].reverse()
                                             s0s[i][0] = float(spines[i][0][0])
                                             s0s[i][1] = float(spines[i][0][1])
-                                            print(f'{i}', end=' ')
                                             i += 1
                                         ii += 1
                     else:
-                        if i + 1 < l:
-                            for j in range(spine_len):
-                                spines[i][j][0] = (spines[i - 1][j][0] + spines[i + 1][j][0]) / 2
-                                spines[i][j][1] = (spines[i - 1][j][1] + spines[i + 1][j][1]) / 2
-                            s0s[i][0] = float(spines[i][0][0])
-                            s0s[i][1] = float(spines[i][0][1])
-                            print(f'{i}', end=' ')
+                        s0s[i][0] = float(spines[i][0][0])
+                        s0s[i][1] = float(spines[i][0][1])
                     ii += 1
                 stds_new = [0 for i in range(l)]
                 error2_frames_new = []
@@ -1052,17 +1055,49 @@ while True:
                     if stds_new[i] > 2:
                         error2_frames_new.append(i)
                 error2_count_new = len(error2_frames_new)
-                print(f'\n{error2_count_new} abnormal frames remain.')
+                print(f'{error2_count_new} abnormal frames remain after correction of reversed frames.')
+                error2_groups = []
+                i = 0
+                while i < error2_count_new:
+                    error_group = [error2_frames_new[i]]
+                    j = i + 1
+                    while j < error2_count_new:
+                        if error2_frames_new[j] - error2_frames_new[j - 1] == 1:
+                            error_group.append(error2_frames_new[j])
+                            j += 1
+                        else:
+                            i = j - 1
+                            break
+                    error2_groups.append((error_group[0], len(error_group)))
+                    i += 1
+                for error_group in error2_groups:
+                    start = error_group[0]
+                    error_len = error_group[1]
+                    end = min(start + error_len, l - 1)
+                    for i in range(error_len):
+                        for j in range(spine_len):
+                            spines[start + i][j][0] = (spines[start - 1][j][0] * (error_len - i) + spines[end][j][0] * (i + 1)) / (error_len + 1)
+                            spines[start + i][j][1] = (spines[start - 1][j][1] * (error_len - i) + spines[end][j][1] * (i + 1)) / (error_len + 1)
+                        s0s[start + i][0] = float(spines[start + i][0][0])
+                        s0s[start + i][1] = float(spines[start + i][0][1])
+                stds_new = [0 for i in range(l)]
+                error2_frames_new = []
+                for i in range(1, l):
+                    stds_new[i] = stdev([pyth(spines[i - 1][j], spines[i][j]) for j in range(spine_len)])
+                    if stds_new[i] > 2:
+                        error2_frames_new.append(i)
+                error2_count_new = len(error2_frames_new)
+                print(f'{error2_count_new} abnormal frames remain: {error2_frames_new}')
                 with open(path + '/' + videoname + '_stds.csv', 'w') as f:
-                    f.write('Std,Std_corrected\n')
+                    f.write('Frame,Std,Std_corrected\n')
                     for i in range(l):
-                        f.write(f'{stds[i]},{stds_new[i]}\n')
+                        f.write(f'{i},{stds[i]},{stds_new[i]}\n')
                 errors_new_all.update({videoname: error2_count_new})
             else:
                 with open(path + '/' + videoname + '_stds.csv', 'w') as f:
-                    f.write('Std\n')
-                    for i in stds:
-                        f.write(f'{i}\n')
+                    f.write('Frame,Std\n')
+                    for i in range(l):
+                        f.write(f'{i},{stds[i]}\n')
             
             spine_lens = [spine_len for i in range(l)]
             if not settings['use_s1']:
@@ -1235,6 +1270,7 @@ while True:
             fdirs_df = [d.dict for d in fdirs.dflns]
             for i in range(fdirs.dflns_count):
                 fdirs_df[i].update(fdirs.dflns[i].env)
+                fdirs_df[i].update({'centralpos': fdirs.dflns[i].centralpos})
             fdirs_df = pd.DataFrame(fdirs_df)
             fdirs_methods = {'turn_angle': agg1,
                              'turn_angular_velocity': agg2,
@@ -1258,6 +1294,7 @@ while True:
             angles_df = [d.dict for d in angles.dflns]
             for i in range(angles.dflns_count):
                 angles_df[i].update(angles.dflns[i].env)
+                angles_df[i].update({'centralpos': angles.dflns[i].centralpos})
             angles_df = pd.DataFrame(angles_df)
             angles_methods = {'angle_change': agg1,
                               'bend_dur': agg1,
@@ -1531,7 +1568,12 @@ while True:
                     
                 s.properties.update({'bend_wave_freq': s.bends_count / s.properties['bend_dur_total']})
             
-            steps_df = pd.DataFrame([s.properties for s in steps])
+            steps_df = []
+            for s in steps:
+                temp = s.properties
+                temp.update({'centralpos': s.centralpos})
+                steps_df.append(temp)
+            steps_df = pd.DataFrame(steps_df)
             steps_df = steps_df[steps_df['bend_count'] >= 1]
             steps_methods = {
                 'step_length': agg2,
