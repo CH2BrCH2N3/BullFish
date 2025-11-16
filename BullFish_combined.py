@@ -198,7 +198,6 @@ while True:
             "spine_analysis": 1,
             "spine_points": 10,
             'fast_s1': 0,
-            "turn_max": 100,
             'find_s0': 0,
             "auto_bg": 1,
             "fish_cover_size": 1.5,
@@ -801,9 +800,11 @@ while True:
             "min_max_accel": 100,
             "min_speed_change": 0,
             "spine_analysis": 1,
-            'use_s1': 1,
-            'correct_errors': 0,
             'alternate_turn': 0,
+            'use_s0': 0,
+            'correct_errors': 0,
+            'correction_window': 0.05,
+            'max_turn': 1,
             "turn_cutoff": 2,
             "min_turn_dur": 0.02,
             "min_max_turn_velocity": 2,
@@ -819,8 +820,7 @@ while True:
         videonames = []
         analyses = []
         analyses_df = pd.DataFrame()
-        errors_all = {}
-        errors_new_all = {}
+        error2s_all = []
         fdirs_all = pd.DataFrame()
         angles_all = pd.DataFrame()
         steps_all = pd.DataFrame()
@@ -1008,7 +1008,7 @@ while True:
                         spines[i][j][1] = float(spines_temp[i][j * 2 + 1]) * ratio
             
             s0s = [[0, 0] for i in range(l)]
-            if not settings['use_s1']:
+            if settings['use_s0']:
                 with open(path + '/' + videoname + '_s0s.csv', 'r') as f:
                     s0s_temp = [[cell for cell in row] for row in csv.reader(f)]
                     s0s_temp.pop(0)
@@ -1016,91 +1016,128 @@ while True:
                         s0s[i][0] = float(s0s_temp[i][0]) * ratio
                         s0s[i][1] = float(s0s_temp[i][1]) * ratio
             
-            stds = [0 for i in range(l)]
-            error2_frames = []
+            error2_pts = []
+            dirs_nn = [0 for i in range(l)]
+            for i in range(l):
+                dirs_nn[i] = cal_direction(spines[i][spine_len - 2], spines[i][spine_len - 1])
+            turns_nn = [0 for i in range(l)]
             for i in range(1, l):
-                stds[i] = stdev([pyth(spines[i - 1][j], spines[i][j]) for j in range(spine_len)])
-                if stds[i] > 2:
-                    error2_frames.append(i)
-            error2_count = len(error2_frames)
-            print(f'{error2_count} frames with abnormal midline points detected at {error2_frames}')
-            errors_all.update({videoname: error2_count})
+                turns_nn[i] = cal_direction_change(dirs_nn[i - 1], dirs_nn[i])
+            dirs_12 = [0 for i in range(l)]
+            for i in range(l):
+                dirs_12[i] = cal_direction(spines[i][0], spines[i][1])
+            turns_12 = [0 for i in range(l)]
+            for i in range(1, l):
+                turns_12[i] = cal_direction_change(dirs_12[i - 1], dirs_12[i])
+            #stds = [0 for i in range(l)]
+            for i in range(1, l):
+                #stds[i] = stdev([pyth(spines[i - 1][j], spines[i][j]) for j in range(spine_len)])
+                if abs(turns_nn[i]) > settings['max_turn'] or abs(turns_12[i]) > settings['max_turn']:
+                    error2_pts.append(i)
+            
+            error2_count = 0
+            error2_pt_count = len(error2_pts)
+            error2_intervals = []
+            window = round(settings['correction_window'] * fps)
+            i = 0
+            while i < error2_pt_count - 1:
+                if error2_pts[i + 1] - error2_pts[i] <= window:
+                    error2_intervals.append([error2_pts[i], error2_pts[i + 1]])
+                    error2_count += (error2_pts[i + 1] - error2_pts[i])
+                    i += 1
+                i += 1
+            print(f'{error2_count} frames with abnormal midline points detected at intervals {error2_intervals}')
             
             if settings['correct_errors']:
-                ii = 0
-                while ii < error2_count:
-                    i = error2_frames[ii]
-                    bool_x = pyth(spines[i - 1][0], spines[i][spine_len - 1]) < pyth(spines[i - 1][0], spines[i][0])
-                    bool_y = pyth(spines[i - 1][spine_len - 1], spines[i][0]) < pyth(spines[i - 1][spine_len - 1], spines[i][spine_len - 1])
-                    if bool_x and bool_y:
-                        if ii + 1 < error2_count:
-                            j = error2_frames[ii + 1]
-                            if j - i <= 5:
-                                if pyth(spines[j - 1][0], spines[j][spine_len - 1]) < pyth(spines[j - 1][0], spines[j][0]):
-                                    if pyth(spines[j - 1][spine_len - 1], spines[j][0]) < pyth(spines[j - 1][spine_len - 1], spines[j][spine_len - 1]):
-                                        while i < j:
-                                            spines[i].reverse()
-                                            s0s[i][0] = float(spines[i][0][0])
-                                            s0s[i][1] = float(spines[i][0][1])
-                                            i += 1
-                                        ii += 1
-                    else:
-                        s0s[i][0] = float(spines[i][0][0])
-                        s0s[i][1] = float(spines[i][0][1])
-                    ii += 1
-                stds_new = [0 for i in range(l)]
-                error2_frames_new = []
+                
+                correct_frames_path = path + '/Corrected_frames'
+                create_path(correct_frames_path)
+                video_n = cv.VideoCapture(path + '/' + videoname + '_n.avi')
+                for interval in error2_intervals:
+                    i = interval[0] - 1
+                    j = interval[1]
+                    w = j - i
+                    for ii in range(1, w):
+                        for jj in range(spine_len):
+                            spines[i + ii][jj][0] = (spines[i][jj][0] * (w - ii) + spines[j][jj][0] * ii) / w
+                            spines[i + ii][jj][1] = (spines[i][jj][1] * (w - ii) + spines[j][jj][1] * ii) / w
+                        s0s[i + ii][0] = float(spines[i + ii][0][0])
+                        s0s[i + ii][1] = float(spines[i + ii][0][1])
+                        video_n.set(cv.CAP_PROP_POS_FRAMES, i + ii)
+                        ret, frame = video_n.read()
+                        if ret:
+                            for jj in range(spine_len):
+                                colorn = int(jj / spine_len * 255)
+                                cv.circle(frame, (round(spines[i + ii][jj][0] / ratio), round(spines[i + ii][jj][1] / ratio)), 3, (colorn, 255 - colorn // 2, 255 - colorn), -1)
+                            cv.imwrite(correct_frames_path + '/' + str(i + ii) + '.png', frame)
+                video_n.release()
+                
+                error2_pts_new = []
+                dirs_nn_new = [0 for i in range(l)]
+                for i in range(l):
+                    dirs_nn_new[i] = cal_direction(spines[i][spine_len - 2], spines[i][spine_len - 1])
+                turns_nn_new = [0 for i in range(l)]
                 for i in range(1, l):
-                    stds_new[i] = stdev([pyth(spines[i - 1][j], spines[i][j]) for j in range(spine_len)])
-                    if stds_new[i] > 2:
-                        error2_frames_new.append(i)
-                error2_count_new = len(error2_frames_new)
-                print(f'{error2_count_new} abnormal frames remain after correction of reversed frames.')
-                error2_groups = []
+                    turns_nn_new[i] = cal_direction_change(dirs_nn_new[i - 1], dirs_nn_new[i])
+                dirs_12_new = [0 for i in range(l)]
+                for i in range(l):
+                    dirs_12_new[i] = cal_direction(spines[i][0], spines[i][1])
+                turns_12_new = [0 for i in range(l)]
+                for i in range(1, l):
+                    turns_12_new[i] = cal_direction_change(dirs_12_new[i - 1], dirs_12_new[i])
+                for i in range(1, l):
+                    if abs(turns_nn_new[i]) > settings['max_turn'] or abs(turns_12_new[i]) > settings['max_turn']:
+                        error2_pts_new.append(i)
+                
+                error2_count_new = 0
+                error2_pt_count_new = len(error2_pts_new)
+                error2_intervals_new = []
                 i = 0
-                while i < error2_count_new:
-                    error_group = [error2_frames_new[i]]
-                    j = i + 1
-                    while j < error2_count_new:
-                        if error2_frames_new[j] - error2_frames_new[j - 1] == 1:
-                            error_group.append(error2_frames_new[j])
-                            j += 1
-                        else:
-                            i = j - 1
-                            break
-                    error2_groups.append((error_group[0], len(error_group)))
+                while i < error2_pt_count_new - 1:
+                    if error2_pts_new[i + 1] - error2_pts_new[i] <= window:
+                        error2_intervals_new.append([error2_pts_new[i], error2_pts_new[i + 1]])
+                        error2_count_new += (error2_pts_new[i + 1] - error2_pts_new[i])
+                        i += 1
                     i += 1
-                for error_group in error2_groups:
-                    start = error_group[0]
-                    error_len = error_group[1]
-                    end = min(start + error_len, l - 1)
-                    for i in range(error_len):
+                print(f'{error2_count_new} frames remain at intervals {error2_intervals_new}')
+                error2s_all.append({
+                    'videoname': videoname,
+                    'error2_count': error2_count,
+                    'error2_count_new': error2_count_new})
+                
+                with open(path + '/' + videoname + '_error2s.csv', 'w') as f:
+                    f.write('Frame,Turn_nn,Turn_nn_corrected,Turn_12,Turn_12_corrected\n')
+                    for i in range(l):
+                        f.write(f'{i},{turns_nn[i]},{turns_nn_new[i]},{turns_12[i]},{turns_12_new[i]}\n')
+                
+                with open(path + '/' + videoname + '_spine_corrected.csv', 'w') as f:
+                    for i in range(l):
                         for j in range(spine_len):
-                            spines[start + i][j][0] = (spines[start - 1][j][0] * (error_len - i) + spines[end][j][0] * (i + 1)) / (error_len + 1)
-                            spines[start + i][j][1] = (spines[start - 1][j][1] * (error_len - i) + spines[end][j][1] * (i + 1)) / (error_len + 1)
-                        s0s[start + i][0] = float(spines[start + i][0][0])
-                        s0s[start + i][1] = float(spines[start + i][0][1])
-                stds_new = [0 for i in range(l)]
-                error2_frames_new = []
-                for i in range(1, l):
-                    stds_new[i] = stdev([pyth(spines[i - 1][j], spines[i][j]) for j in range(spine_len)])
-                    if stds_new[i] > 2:
-                        error2_frames_new.append(i)
-                error2_count_new = len(error2_frames_new)
-                print(f'{error2_count_new} abnormal frames remain: {error2_frames_new}')
-                with open(path + '/' + videoname + '_stds.csv', 'w') as f:
-                    f.write('Frame,Std,Std_corrected\n')
-                    for i in range(l):
-                        f.write(f'{i},{stds[i]},{stds_new[i]}\n')
-                errors_new_all.update({videoname: error2_count_new})
+                            f.write(f'{spines[i][j][0]},{spines[i][j][1]},')
+                        f.write('\n')
+                
             else:
-                with open(path + '/' + videoname + '_stds.csv', 'w') as f:
-                    f.write('Frame,Std\n')
+                
+                error2s_all.append({
+                    'videoname': videoname,
+                    'error2_count': error2_count})
+                with open(path + '/' + videoname + '_error2s.csv', 'w') as f:
+                    f.write('Frame,Turn_nn,Turn_12\n')
                     for i in range(l):
-                        f.write(f'{i},{stds[i]}\n')
+                        f.write(f'{i},{turns_nn[i]},{turns_12[i]}\n')
+            
+            directions = [0 for i in range(l)]
+            for i in range(l):
+                if settings['alternate_turn']:
+                    directions[i] = cal_direction(spines[i][round(spine_len * 2 / 3)], spines[i][spine_len - 1])
+                else:
+                    directions[i] = cal_direction(spines[i][spine_len - 2], spines[i][spine_len - 1])
+            turns = [0 for i in range(l)]
+            for i in range(1, l):
+                turns[i] = cal_direction_change(directions[i - 1], directions[i])
             
             spine_lens = [spine_len for i in range(l)]
-            if not settings['use_s1']:
+            if settings['use_s0']:
                 for i in range(l):
                     if abs(s0s[i][0] - spines[i][0][0]) >= 0.1 and abs(s0s[i][1] - spines[i][0][1]) >= 0.1:
                         spines[i].insert(0, [float(s0s[i][0]), float(s0s[i][1])])
@@ -1112,16 +1149,6 @@ while True:
                 temp.pop(0)
                 for i in range(l):
                     heads[i] = (float(temp[i][0]) * ratio, float(temp[i][1]) * ratio)
-            
-            directions = [0 for i in range(l)]
-            for i in range(l):
-                if settings['alternate_turn']:
-                    directions[i] = cal_direction(spines[i][round(spine_lens[i] * 2 / 3)], spines[i][spine_lens[i] - 1])
-                else:
-                    directions[i] = cal_direction(spines[i][spine_lens[i] - 2], spines[i][spine_lens[i] - 1])
-            turns = [0 for i in range(l)]
-            for i in range(1, l):
-                turns[i] = cal_direction_change(directions[i - 1], directions[i])
             
             # calculate bend angles, amps
             spine_angles = [[] for i in range(l)]
@@ -1643,16 +1670,10 @@ while True:
         analyses.columns = videonames
         analyses.to_csv('analyses.csv')
         
-        if settings['correct_errors']:
-            with open('errors.csv', 'w') as f:
-                f.write('Video,Number of abnormal frames,Number of abnormal frames after correction\n')
-                for key, value in errors_all.items():
-                    f.write(f'{key},{value},{errors_new_all[key]}\n')
-        else:
-            with open('errors.csv', 'w') as f:
-                f.write('Video,Number of abnormal frames\n')
-                for key, value in errors_all.items():
-                    f.write(f'{key},{value}\n')
+        with open('error2s.csv', 'w', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=error2s_all[0].keys())
+            writer.writeheader()
+            writer.writerows(error2s_all)
         
         analyses_df.to_csv('analyses_df.csv', index=False)
         if not settings['spine_analysis']:
