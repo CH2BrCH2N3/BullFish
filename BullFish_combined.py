@@ -4,16 +4,18 @@ import cv2 as cv
 import numpy as np
 import pandas as pd
 from math import sqrt, cos
-from statistics import median, stdev
+from statistics import median
 from copy import copy, deepcopy
 from traceback import print_exc
 from BullFish_pkg.general import create_path, get_input, csvtodict, load_settings
 from BullFish_pkg.math import pyth, cal_direction, cal_direction_change
-from BullFish_pkg.cv_editing import get_rm, frame_rotate, frame_grc, frame_blur, max_entropy_threshold, sq_area
+from BullFish_pkg.cv_editing import get_rm, frame_rotate, frame_grc, frame_blur, max_entropy_threshold, find_com, sq_area
 from BullFish_pkg.plot import errors_correct, curve, step, DF, results_df
 import matplotlib.pyplot as plt
 from BullFish_pkg.plot import plot_data
 
+supported_formats = {'.avi', '.mp4', '.MOV'}
+            
 print('Welcome to BullFish. After recording your zebrafish videos, this program will analyze their locomotion.')
 print('BullFish consists of 3 programs:')
 print('- [v]ideosetup: The user will select the video segment and swimming area for tracking and analysis.')
@@ -55,7 +57,6 @@ while True:
              
             filename = os.fsdecode(file)
             filename_split = os.path.splitext(filename)
-            supported_formats = {'.avi', '.mp4'}
             if filename_split[1] not in supported_formats:
                 continue
             video = cv.VideoCapture(filename)
@@ -210,120 +211,127 @@ while True:
             try:
                 filename = os.fsdecode(file)
                 filename_split = os.path.splitext(filename)
-                supported_formats = {'.avi', '.mp4'}
                 if filename_split[1] not in supported_formats:
                     continue
                 video = cv.VideoCapture(filename)
                 if not video.isOpened():
-                    print(filename + ' cannot be opened.')
+                    print(f'{filename} cannot be opened.')
                     continue
                 videoname = filename_split[0]
-                path = './' + videoname
-                if not os.path.isfile(path + '/' + videoname + '_metadata.csv'):
-                    print('Metadata missing for ' + videoname)
+                path = f'./{videoname}'
+                if not os.path.isfile(f'{path}/{videoname}_metadata.csv'):
+                    print(f'Metadata missing for {videoname}')
                     continue
-                print('\nProcessing ' + filename)
+                print(f'\nProcessing {filename}')
             except Exception:
-                print('An error occurred when opening ' + videoname + ':')
+                print(f'An error occurred when opening {videoname}:')
                 print_exc()
                 continue
             
             try:
-                metadata = csvtodict(path + '/' + videoname + '_metadata.csv')
+                metadata = csvtodict(f'{path}/{videoname}_metadata.csv')
+                video_start = metadata['video_start']
+                video_end = metadata['video_end']
+                fps = metadata['fps']
+                x_original = metadata['x_original']
+                y_original = metadata['y_original']
+                rotate = metadata['rotate']
+                rm = get_rm(x_original, y_original, rotate)
+                crop_tlx = metadata['crop_tlx']
+                crop_tly = metadata['crop_tly']
+                crop_x = metadata['crop_x']
+                crop_y = metadata['crop_y']
+                x_current = metadata['x_current']
+                y_current = metadata['y_current']
+                downsampling = metadata['downsampling']
+                l = (video_end - video_start) // downsampling
+                t_sampling = settings['t_sampling_time'] * fps * downsampling # calculate threshold once every how many frames
             except Exception:
-                print('An error occurred when accessing the metadata of ' + videoname + ':')
+                print(f'An error occurred when accessing the metadata of {videoname}:')
                 print_exc()
                 continue
             
-            try:
+            threshold1s = np.zeros(l, dtype=np.int32)
+            cen_start = [0, 0]
+            fish_perimeter1s = []
+            threshold2s = np.zeros(l, dtype=np.int32)
+            leftmosts = [0 for i in range(l)]
+            rightmosts = [0 for i in range(l)]
+            topmosts = [0 for i in range(l)]
+            bottommosts = [0 for i in range(l)]
+            fish_perimeter2s = []
+            i = 0
+            j = video_start
                 
-                rm = get_rm(metadata['x_original'], metadata['y_original'], metadata['rotate'])
+            while j < video_end:
                 
-                l = (metadata['video_end'] - metadata['video_start']) // metadata['downsampling']
-                j = metadata['video_start']
                 video.set(cv.CAP_PROP_POS_FRAMES, j)
+                ret, frame = video.read()
                 
-                t_sampling = settings['t_sampling_time'] * metadata['fps'] * metadata['downsampling'] # calculate threshold once every how many frames
-                threshold1s = np.zeros(l, dtype=np.int32)
-                if settings['find_s0']:
-                    threshold2s = np.zeros(l, dtype=np.int32)
-                    leftmosts = [0 for i in range(l)]
-                    rightmosts = [0 for i in range(l)]
-                    topmosts = [0 for i in range(l)]
-                    bottommosts = [0 for i in range(l)]
-                    fish_perimeter2s = [] # impression of fish perimeter in t2
-                    if not settings['auto_bg']:
-                        print('Loading background...')
-                        background = cv.imread(path + '/' + videoname + '_background.png')
-                        background = cv.cvtColor(background, cv.COLOR_BGR2GRAY)
-                            
-                i = 0
-                
-                while j < metadata['video_end']:
+                try:
                     
-                    video.set(cv.CAP_PROP_POS_FRAMES, j)
-                    ret, frame = video.read()
+                    frame_t = frame_grc(frame, x_original, y_original, rotate, rm, crop_tlx, crop_tly, crop_x, crop_y)
+                    frame_b = frame_blur(frame_t, settings['ksize'])
                     
-                    if ret:
-                        
-                        frame_t = frame_grc(frame, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
-                        frame_b = frame_blur(frame_t, settings['ksize'])
-                        
-                        threshold1s[i] = max_entropy_threshold(frame_b, settings['threshold1_reduction'])
-                        ret, t1frame = cv.threshold(frame_b, threshold1s[i], 255, cv.THRESH_BINARY_INV)
-                        
-                        if settings['find_s0']:
-                            contours, hierarchy = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
-                            contour_number = len(contours)
-                            max_perimeter = 0
-                            for ii in range(contour_number):
-                                contour_len = len(contours[ii])
-                                if contour_len > max_perimeter:
-                                    max_perimeter = contour_len
-                                    fish_contour = contours[ii]
-                            leftmost = tuple(fish_contour[fish_contour[:,:,0].argmin()][0])
-                            rightmost = tuple(fish_contour[fish_contour[:,:,0].argmax()][0])
-                            topmost = tuple(fish_contour[fish_contour[:,:,1].argmin()][0])
-                            bottommost = tuple(fish_contour[fish_contour[:,:,1].argmax()][0])
-                            leftmosts[i] = leftmost[0]
-                            rightmosts[i] = rightmost[0]
-                            topmosts[i] = topmost[1]
-                            bottommosts[i] = bottommost[1]
-                
-                    else:
+                    threshold1s[i] = max_entropy_threshold(frame_b, settings['threshold1_reduction'])
+                    ret, t1frame = cv.threshold(frame_b, threshold1s[i], 255, cv.THRESH_BINARY_INV)
+                    contours, hierarchy = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
+                    contour_number = len(contours)
+                    max_perimeter = 0
+                    for ii in range(contour_number):
+                        contour_len = len(contours[ii])
+                        if contour_len > max_perimeter:
+                            max_perimeter = contour_len
+                            fish_contour = contours[ii]
+                    fish_perimeter1s.append(max_perimeter)
+                    if i == 0:
+                        cen_start = find_com(fish_contour, 'a')
                     
-                        break
+                    if settings['find_s0']:
+                        leftmost = tuple(fish_contour[fish_contour[:,:,0].argmin()][0])
+                        rightmost = tuple(fish_contour[fish_contour[:,:,0].argmax()][0])
+                        topmost = tuple(fish_contour[fish_contour[:,:,1].argmin()][0])
+                        bottommost = tuple(fish_contour[fish_contour[:,:,1].argmax()][0])
+                        leftmosts[i] = leftmost[0]
+                        rightmosts[i] = rightmost[0]
+                        topmosts[i] = topmost[1]
+                        bottommosts[i] = bottommost[1]
             
-                    print('\rt1_sampling progress: ', i, '/', l, end='')
-                    j = round(j + t_sampling)
-                    i = round(i + t_sampling)
+                except Exception:
                 
-                print()
-                
-                i = 1
-                start = 0
-                while i < l:
-                    if threshold1s[i] != 0:
-                        j = start + 1
-                        while j < i:
-                            threshold1s[j] = round((threshold1s[start] * (i - j) + threshold1s[i] * (j - start)) / (i - start))
-                            j += 1
-                        start = i
-                    i += 1
-                i = start
-                while i < l:
-                    threshold1s[i] = threshold1s[start]
-                    i += 1
-                
-                if settings['find_s0']:
-                    
-                    if not settings['auto_bg']:
-                        
-                        print('Loading background...')
-                        background = cv.imread(path + '/' + videoname + '_background.png')
-                        background = cv.cvtColor(background, cv.COLOR_BGR2GRAY)
-                        
+                    print(f'\nAn error occurred when calculating the threshold at Frame {j} of {videoname}:')
+                    if i == 0:
+                        threshold1s[i] = 90
                     else:
+                        threshold1s[i] = threshold1s[i - t_sampling]
+                    print_exc()
+        
+                print(f'\rt1_sampling progress: {i}/{l}', end='')
+                j = round(j + t_sampling)
+                i = round(i + t_sampling)
+            
+            print()
+                
+            i = 1
+            start = 0
+            while i < l:
+                if threshold1s[i] != 0:
+                    j = start + 1
+                    while j < i:
+                        threshold1s[j] = round((threshold1s[start] * (i - j) + threshold1s[i] * (j - start)) / (i - start))
+                        j += 1
+                    start = i
+                i += 1
+            i = start
+            while i < l:
+                threshold1s[i] = threshold1s[start]
+                i += 1
+                
+            if settings['find_s0']:
+                
+                if settings['auto_bg']:
+                    
+                    try:
                         
                         print('Creating background...')
                         center_x0 = (leftmosts[0] + rightmosts[0]) / 2
@@ -356,13 +364,13 @@ while True:
                             else:
                                 i = round(i + t_sampling)
                         
-                        video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'])
+                        video.set(cv.CAP_PROP_POS_FRAMES, video_start)
                         ret, frame0 = video.read()
-                        background = frame_grc(frame0, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
+                        background = frame_grc(frame0, x_original, y_original, rotate, rm, crop_tlx, crop_tly, crop_x, crop_y)
                         
-                        video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'] + background_frame)
+                        video.set(cv.CAP_PROP_POS_FRAMES, video_start + background_frame)
                         ret, framei = video.read()
-                        framei = frame_grc(framei, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
+                        framei = frame_grc(framei, x_original, y_original, rotate, rm, crop_tlx, crop_tly, crop_x, crop_y)
                         
                         for ii in range(top_boundary0, bottom_boundary0 + 1):
                             for jj in range(left_boundary0, right_boundary0 + 1):
@@ -370,23 +378,42 @@ while True:
                                     background[ii][jj] = framei[ii][jj]
                                 except:
                                     pass
-                        print('Background created with frames ' + str(metadata['video_start']) + ' and ' + str(metadata['video_start'] + background_frame))
-                        cv.imwrite(path + '/' + videoname + '_0.png', frame0)
-                        cv.imwrite(path + '/' + videoname + '_i.png', framei)
-                        cv.imwrite(path + '/' + videoname + '_background.png', background)
-                        print(videoname + '_background.png' + ' saved.')
+                        print(f'Background created with frames {video_start} and {video_start + background_frame}')
+                        cv.imwrite(f'{path}/{videoname}_0.png', frame0)
+                        cv.imwrite(f'{path}/{videoname}_i.png', framei)
+                        cv.imwrite(f'{path}/{videoname}_background.png', background)
+                        print(f'{videoname}_background.png saved.')
                     
-                    i = 0
-                    j = metadata['video_start']
+                    except Exception:
+                        
+                        print(f'\nAn error occurred when creating background for {videoname}:')
+                        print_exc()
+                        continue
                     
-                    while j < metadata['video_end']:
+                else:
+                    
+                    try:
+                        print('Loading background...')
+                        background = cv.imread(f'{path}/{videoname}_background.png')
+                        background = cv.cvtColor(background, cv.COLOR_BGR2GRAY)
+                    except Exception:
+                        print(f'An error occurred when accessing the background of {videoname}:')
+                        print_exc()
+                        continue
+                
+                i = 0
+                j = video_start
+                
+                while j < video_end:
+                    
+                    video.set(cv.CAP_PROP_POS_FRAMES, j)
+                    ret, frame = video.read()
+                    
+                    if ret:
                         
-                        video.set(cv.CAP_PROP_POS_FRAMES, j)
-                        ret, frame = video.read()
-                        
-                        if ret:
+                        try:
                             
-                            frame_t = frame_grc(frame, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
+                            frame_t = frame_grc(frame, x_original, y_original, rotate, rm, crop_tlx, crop_tly, crop_x, crop_y)
                             frame_d = 255 - cv.absdiff(frame_t, background)
                             frame_db = frame_blur(frame_d, settings['ksize'])
                             threshold2s[i] = max_entropy_threshold(frame_db, settings['threshold2_reduction'])
@@ -395,103 +422,133 @@ while True:
                             contours, hierarchy = cv.findContours(t2frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
                             fish_perimeter2s.append(max([len(contour) for contour in contours]))
                             
-                        else:
+                        except Exception:
+                            
+                            print(f'\nAn error occurred when calculating the threshold at Frame {j} of {videoname}:')
+                            if i == 0:
+                                threshold2s[i] = 10
+                            else:
+                                threshold2s[i] = threshold2s[i - t_sampling]
+                            print_exc()
                         
-                            break
-                
-                        print('\rt2_sampling progress: ', i, '/', l, end='')
-                        j = round(j + t_sampling)
-                        i = round(i + t_sampling)
+                    else:
                     
-                    print()
+                        break
+            
+                    print(f'\rt2_sampling progress: {i}/{l}', end='')
+                    j = round(j + t_sampling)
+                    i = round(i + t_sampling)
                 
-                    i = 1
-                    start = 0
-                    while i < l:
-                        if threshold2s[i] != 0:
-                            j = start + 1
-                            while j < i:
-                                threshold2s[j] = round((threshold2s[start] * (i - j) + threshold2s[i] * (j - start)) / (i - start))
-                                j += 1
-                            start = i
-                        i += 1
-                    i = start
-                    while i < l:
-                        threshold2s[i] = threshold2s[start]
-                        i += 1
-                
-            except Exception:
-                print_exc()
-                continue
-                
+                print()
+            
+                i = 1
+                start = 0
+                while i < l:
+                    if threshold2s[i] != 0:
+                        j = start + 1
+                        while j < i:
+                            threshold2s[j] = round((threshold2s[start] * (i - j) + threshold2s[i] * (j - start)) / (i - start))
+                            j += 1
+                        start = i
+                    i += 1
+                i = start
+                while i < l:
+                    threshold2s[i] = threshold2s[start]
+                    i += 1
+            
             try:
                 
                 if settings['save_edittedvideo']:
                     c = settings['save_edittedvideo']
-                    edited = cv.VideoWriter(path + '/' + videoname + '_n.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']), 0)
+                    edited = cv.VideoWriter(f'{path}/{videoname}_n.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
                 if settings['save_binaryvideo']:
                     c = settings['save_binaryvideo']
-                    binary1 = cv.VideoWriter(path + '/' + videoname + '_t1.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']), 0)
+                    binary1 = cv.VideoWriter(f'{path}/{videoname}_t1.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
                     if settings['find_s0']:
-                        binary2 = cv.VideoWriter(path + '/' + videoname + '_t2.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']), 0)
+                        binary2 = cv.VideoWriter(f'{path}/{videoname}_t2.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
                 if settings['save_annotatedvideo']:
                     c = settings['save_annotatedvideo']
-                    annotated = cv.VideoWriter(path + '/' + videoname + '_a.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), metadata['fps'], (metadata['x_current'], metadata['y_current']))
-                    
-                i = 0
-                cen = np.zeros((l, 2))
-                spine_len = settings['spine_points']
-                spines = np.zeros((l, spine_len, 2))
-                fish_perimeters = np.zeros(l, dtype=np.int32)
-                heads = np.zeros((l, 2), dtype=np.int32)
-                s0s = np.zeros((l, 2), dtype=np.int32)
-                errors = {
-                    'fish_not_found': [],
-                    's0_not_found': []
-                    }
+                    annotated = cv.VideoWriter(f'{path}/{videoname}_a.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current))
+            
+            except Exception:
                 
-                video.set(cv.CAP_PROP_POS_FRAMES, metadata['video_start'])
-                i = 0
-                j = metadata['video_start']
+                print(f'An error occurred when initializing output videos for {videoname}:')
+                print_exc()
+                continue
+            
+            cens = [None for i in range(l)]
+            fish_perimeter1_est = median(fish_perimeter1s)
+            spine_len = settings['spine_points']
+            spines = np.zeros((l, spine_len, 2))
+            fish_perimeters = np.zeros(l, dtype=np.int32)
+            heads = np.zeros((l, 2), dtype=np.int32)
+            s0s = np.zeros((l, 2), dtype=np.int32)
+            errors = {
+                'fish_not_found': [],
+                's0_not_found': []}
                 
-                while j < metadata['video_end']:
+            video.set(cv.CAP_PROP_POS_FRAMES, video_start)
+            i = 0
+            j = video_start
+            
+            while j < video_end:
+                
+                ret, frame = video.read()
+                
+                if ret:
                     
-                    ret, frame = video.read()
-                    
-                    if ret:
-                    
-                        frame_t = frame_grc(frame, metadata['x_original'], metadata['y_original'], metadata['rotate'], rm, metadata['crop_tlx'], metadata['crop_tly'], metadata['crop_x'], metadata['crop_y'])
+                    try:
+                        
+                        frame_t = frame_grc(frame, x_original, y_original, rotate, rm, crop_tlx, crop_tly, crop_x, crop_y)
                         if settings['save_edittedvideo']:
                             edited.write(frame_t)
                         
                         if settings['save_annotatedvideo']:
                             aframe = cv.cvtColor(frame_t, cv.COLOR_GRAY2BGR)
                         
-                        frame_b = frame_blur(frame_t, settings['ksize'])
+                        frame_b = frame_blur(frame_t, settings['ksize']) # Blurring and thresholding without background subtraction
                         ret, t1frame = cv.threshold(frame_b, threshold1s[i], 255, cv.THRESH_BINARY_INV)
                         
-                        contours1, hierarchy1 = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE)
-                        contours1_number = len(contours1)
-                        if contours1_number == 0:
+                        contour1s, hierarchy1 = cv.findContours(t1frame, cv.RETR_LIST, cv.CHAIN_APPROX_NONE) # Identify fish contour
+                        contour1_count = len(contour1s)
+                        if contour1_count == 1:
+                            fish_contour1_index = 0
+                            fish_contour1 = contour1s[0]
+                            cens[i] = find_com(fish_contour1, 'a')
+                        elif contour1_count >= 2:
+                            candidates = []
+                            for ii, contour in enumerate(contour1s):
+                                candidates.append({
+                                    'index': ii,
+                                    'len': len(contour)})
+                            candidates.sort(reverse=True, key=lambda candidate: candidate['len'])
+                            if candidates[1]['len'] > fish_perimeter1_est / 3:
+                                cen0 = find_com(contour1s[candidates[0]['index']], 'a')
+                                cen1 = find_com(contour1s[candidates[1]['index']], 'a')
+                                if pyth(cen_start, cen0) <= pyth(cen_start, cen1):
+                                    fish_contour1_index = candidates[0]['index']
+                                    fish_contour1 = contour1s[candidates[0]['index']]
+                                    cens[i] = cen0
+                                else:
+                                    fish_contour1_index = candidates[1]['index']
+                                    fish_contour1 = contour1s[candidates[1]['index']]
+                                    cens[i] = cen1
+                            else:
+                                fish_contour1_index = candidates[0]['index']
+                                fish_contour1 = contour1s[candidates[0]['index']]
+                                cens[i] = find_com(fish_contour1, 'a')
+                        fish_perimeter1 = len(fish_contour1)
+                        if contour1_count == 0 or fish_perimeter1 < spine_len * 2:
                             errors['fish_not_found'].append(i)
                             continue
-                        fish_perimeter1 = 0
-                        for ii in range(contours1_number):
-                            contour1_len = len(contours1[ii])
-                            if contour1_len > fish_perimeter1:
-                                fish_perimeter1 = contour1_len
-                                fish_contour1 = contours1[ii]
-                                fish_contour1_index = ii
                         fish_perimeters[i] = fish_perimeter1
+                        cen_start[0] = float(cens[i][0])
+                        cen_start[1] = float(cens[i][1])
                         
-                        s1frame = np.zeros((metadata['y_current'], metadata['x_current']), dtype = np.uint8)
-                        cv.drawContours(s1frame, contours1, fish_contour1_index, 255, -1)
+                        s1frame = np.zeros((y_current, x_current), dtype=np.uint8)
+                        cv.drawContours(s1frame, contour1s, fish_contour1_index, 255, -1)
                         if settings['save_binaryvideo']:
                             binary1.write(s1frame)
-                        
-                        moment = cv.moments(fish_contour1)
-                        cen[i, 0] = moment['m10'] / moment['m00']
-                        cen[i, 1] = moment['m01'] / moment['m00']
                         
                         if settings['spine_analysis']:
                             
@@ -590,9 +647,12 @@ while True:
                                     spines[i, ii, 0] = (fish_contour1_points[current_pos, 0] + fish_contour1_points[cor_pos, 0]) / 2
                                     spines[i, ii, 1] = (fish_contour1_points[current_pos, 1] + fish_contour1_points[cor_pos, 1]) / 2
                             
+                            midpos = spine_len // 2
+                            cen_start[0] = float(spines[i, midpos, 0])
+                            cen_start[1] = float(spines[i, midpos, 1])
+                            
                             if settings['find_s0']:
                                 
-                                midpos = spine_len // 2
                                 fish_perimeter2_est = median(fish_perimeter2s)
                                 frame_d = 255 - cv.absdiff(frame_t, background)
                                 frame_db = frame_blur(frame_d, settings['ksize'])
@@ -626,7 +686,7 @@ while True:
                                         if fish_perimeter2 > fish_perimeter2_est * 3:
                                             continue
                                         
-                                        s2frame = np.zeros((metadata['y_current'], metadata['x_current']), dtype = np.uint8)
+                                        s2frame = np.zeros((y_current, x_current), dtype=np.uint8)
                                         cv.drawContours(s2frame, contours2, fish_contour2_index, 255, -1)
                                         if settings['save_binaryvideo']:
                                             binary2.write(s2frame)
@@ -658,7 +718,7 @@ while True:
                                         break
                         
                         if settings['save_annotatedvideo']:
-                            cv.circle(aframe, (int(cen[i, 0]), int(cen[i, 1])), 3, (0, 255, 255), -1)
+                            cv.circle(aframe, (int(cens[i][0]), int(cens[i][1])), 3, (0, 255, 255), -1)
                             if settings['spine_analysis']:
                                 for ii in range(fish_perimeter1):
                                     colorn = int(ii / fish_perimeter1 * 255)
@@ -672,115 +732,97 @@ while True:
                                     cv.circle(aframe, (round(s0s[i, 0]), round(s0s[i, 1])), 3, (255, 0, 255), -1)
                             annotated.write(aframe)
                     
-                    else:
+                    except Exception:
                         
-                        break
+                        print(f'\nAn error occurred when tracking at Frame {j} of {videoname}:')
+                        print_exc()
+                        continue
                     
-                    print('\rProgress: ', i, '/', l, end='')
-                    j += metadata['downsampling']
-                    i += 1
+                else:
+                    
+                    break
                 
-                print()
-                video.release()
-                if settings['save_edittedvideo']:
-                    edited.release()
-                if settings['save_binaryvideo']:
-                    binary1.release()
-                    if settings['find_s0']:
-                        binary2.release() 
-                if settings['save_annotatedvideo']:
-                    annotated.release()
-                
-                metadata.update(settings)
-                with open(path + '/' + videoname + '_metadata.csv', 'w') as f:
-                    for key in metadata.keys():
-                        f.write(key + ',' + str(metadata[key]) + '\n')
-                
-                with open(path + '/' + videoname + '_trackdata.csv', 'w', newline='') as f:
-                    if settings['find_s0']:
-                        fieldnames = ['threshold1', 'fish_perimeter', 'leftmost', 'rightmost', 'topmost', 'bottommost', 'threshold2']
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writeheader()
-                        for i in range(l):
-                            writer.writerow({'threshold1': threshold1s[i],
-                                             'fish_perimeter': fish_perimeters[i],
-                                             'leftmost': leftmosts[i],
-                                             'rightmost': rightmosts[i],
-                                             'topmost': topmosts[i],
-                                             'bottommost': bottommosts[i],
-                                             'threshold2': threshold2s[i]})
-                    else:
-                        fieldnames = ['threshold1', 'fish_perimeter']
-                        writer = csv.DictWriter(f, fieldnames=fieldnames)
-                        writer.writeheader()
-                        for i in range(l):
-                            writer.writerow({'threshold1': threshold1s[i],
-                                             'fish_perimeter': fish_perimeters[i]})
+                print(f'\rProgress: {i}/{l}', end='')
+                j += downsampling
+                i += 1
+            
+            print()
+            video.release()
+            if settings['save_edittedvideo']:
+                edited.release()
+            if settings['save_binaryvideo']:
+                binary1.release()
                 if settings['find_s0']:
-                    with open(path + '/' + videoname + '_fish_perimeter2_est.txt', 'w') as f:
-                        f.write(str(fish_perimeter2_est))
-                
-                with open(path + '/' + videoname + '_cen.csv', 'w') as f:
-                    header = ['centroidX', 'centroidY']
-                    for word in header:
-                        f.write(str(word) + ',')
-                    f.write('\n')
+                    binary2.release() 
+            if settings['save_annotatedvideo']:
+                annotated.release()
+            
+            metadata.update(settings)
+            with open(f'{path}/{videoname}_metadata.csv', 'w') as f:
+                for key in metadata.keys():
+                    f.write(f'{key},{metadata[key]}\n')
+            
+            with open(f'{path}/{videoname}_trackdata.csv', 'w', newline='') as f:
+                if settings['find_s0']:
+                    fieldnames = ['threshold1', 'fish_perimeter', 'leftmost', 'rightmost', 'topmost', 'bottommost', 'threshold2']
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
                     for i in range(l):
-                        row = [cen[i, 0], cen[i, 1]]
+                        writer.writerow({'threshold1': threshold1s[i],
+                                         'fish_perimeter': fish_perimeters[i],
+                                         'leftmost': leftmosts[i],
+                                         'rightmost': rightmosts[i],
+                                         'topmost': topmosts[i],
+                                         'bottommost': bottommosts[i],
+                                         'threshold2': threshold2s[i]})
+                else:
+                    fieldnames = ['threshold1', 'fish_perimeter']
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+                    for i in range(l):
+                        writer.writerow({'threshold1': threshold1s[i],
+                                         'fish_perimeter': fish_perimeters[i]})
+            if settings['find_s0']:
+                with open(f'{path}/{videoname}_fish_perimeter2_est.txt', 'w') as f:
+                    f.write(str(fish_perimeter2_est))
+            
+            with open(f'{path}/{videoname}_cen.csv', 'w') as f:
+                f.write('centroidX,centroidY\n')
+                for i in range(l):
+                    f.write(f'{cens[i][0]},{cens[i][1]}\n')
+            
+            if settings['spine_analysis']:
+                
+                with open(f'{path}/{videoname}_errors.csv', 'w') as f:
+                    for key in errors.keys():
+                        f.write(key + ',')
+                        for item in errors[key]:
+                            f.write(str(item) + ',')
+                        f.write('\n')
+                
+                with open(f'{path}/{videoname}_spine.csv', 'w') as f:
+                    f.write('Spine points(XY\, XY\, ...)' + '\n')
+                    for i in range(l):
+                        row = []
+                        for j in range(spine_len):
+                            row.append(spines[i, j, 0])
+                            row.append(spines[i, j, 1])
                         for cell in row:
                             f.write(str(cell) + ',')
                         f.write('\n')
                 
-                if settings['spine_analysis']:
-                    
-                    with open(path + '/' + videoname + '_errors.csv', 'w') as f:
-                        for key in errors.keys():
-                            f.write(key + ',')
-                            for item in errors[key]:
-                                f.write(str(item) + ',')
-                            f.write('\n')
-                    
-                    with open(path + '/' + videoname + '_spine.csv', 'w') as f:
-                        f.write('Spine points(XY\, XY\, ...)' + '\n')
-                        for i in range(l):
-                            row = []
-                            for j in range(spine_len):
-                                row.append(spines[i, j, 0])
-                                row.append(spines[i, j, 1])
-                            for cell in row:
-                                f.write(str(cell) + ',')
-                            f.write('\n')
-                    
-                    with open(path + '/' + videoname + '_sn+1s.csv', 'w') as f:
-                        header = ['sn+1_x', 'sn+1_y']
-                        for word in header:
-                            f.write(str(word) + ',')
-                        f.write('\n')
-                        for i in range(l):
-                            row = [heads[i, 0], heads[i, 1]]
-                            for cell in row:
-                                f.write(str(cell) + ',')
-                            f.write('\n')
-                    
-                    if settings['find_s0']:
-                        with open(path + '/' + videoname + '_s0s.csv', 'w') as f:
-                            header = ['s0_x', 's0_y']
-                            for word in header:
-                                f.write(str(word) + ',')
-                            f.write('\n')
-                            for i in range(l):
-                                row = [s0s[i, 0], s0s[i, 1]]
-                                for cell in row:
-                                    f.write(str(cell) + ',')
-                                f.write('\n')
-                    
-                print('Tracking of ' + videoname + ' complete.')
+                with open(f'{path}/{videoname}_sn+1s.csv', 'w') as f:
+                    f.write('sn+1_x,sn+1_y\n')
+                    for i in range(l):
+                        f.write(f'{heads[i, 0]},{heads[i, 1]}\n')
                 
-            except Exception:
+                if settings['find_s0']:
+                    with open(f'{path}/{videoname}_s0s.csv', 'w') as f:
+                        f.write('s0_x,s0_y\n')
+                        for i in range(l):
+                            f.write(f'{s0s[i, 0]},{s0s[i, 1]}\n')
                 
-                print('An error occurred when processing ' + videoname + ':')
-                print_exc()
-                continue
+            print(f'Tracking of {videoname} complete.')
         
         print('tracker finished.')
         
@@ -804,7 +846,7 @@ while True:
             'use_s0': 0,
             'correct_errors': 0,
             'correction_window': 0.05,
-            'max_turn': 1,
+            'max_turn': 1.57,
             "turn_cutoff": 2,
             "min_turn_dur": 0.02,
             "min_max_turn_velocity": 2,
@@ -813,7 +855,7 @@ while True:
             "min_bend_dur": 0.02,
             "min_bend_speed": 2,
             "min_bend_angle": 0.1,
-            "min_amp": 2}
+            "min_amp": 0.8}
         settings = load_settings('analysis', default_settings)
         
         sampling = settings['sampling']
@@ -832,21 +874,20 @@ while True:
             # check if the file is a video in the supported formats
             filename = os.fsdecode(file)
             filename_split = os.path.splitext(filename)
-            supported_formats = {'.avi', '.mp4'}
             if filename_split[1] not in supported_formats:
                 continue
             
             # check if the video has been tracked
             videoname = filename_split[0]
             path = './' + videoname
-            if not os.path.isfile(path + '/' + videoname + '_metadata.csv'):
+            if not os.path.isfile(f'{path}/{videoname}_metadata.csv'):
                 print('Metadata missing for ' + videoname)
                 continue
             videonames.append(videoname)
             
             # load metadata
             print('\nProcessing ' + filename)
-            metadata = csvtodict(path + '/' + videoname + '_metadata.csv')
+            metadata = csvtodict(f'{path}/{videoname}_metadata.csv')
             l = metadata['video_end'] - metadata['video_start']
             if metadata['swimarea_x'] > metadata['swimarea_y']:
                 ratio = settings['tank_x'] / metadata['swimarea_x']
@@ -855,7 +896,7 @@ while True:
             fps = metadata['fps']
             
             # load essential tracking data
-            with open(path + '/' + videoname + '_cen.csv', 'r') as f:
+            with open(f'{path}/{videoname}_cen.csv', 'r') as f:
                 cen = [[cell for cell in row] for row in csv.reader(f)]
                 cen.pop(0)
                 for i in range(l):
@@ -968,12 +1009,12 @@ while True:
             if speeds.p_dflns_count == 0:
                 print('No detectable movement')
                 if settings['save_individually']:
-                    with open(path + '/' + videoname + '_analysis.csv', 'w') as f:
+                    with open(f'{path}/{videoname}_analysis.csv', 'w') as f:
                         for key in analysis:
                             f.write(key + ',' + str(analysis[key]) + '\n')
                 analyses.append(analysis)
                 print('Analysis of ' + videoname + ' complete.')
-                with open(path + '/' + videoname + '_analysis_notes.csv', 'w') as f:
+                with open(f'{path}/{videoname}_analysis_notes.csv', 'w') as f:
                     for key in settings:
                         f.write(key + ', ' + str(settings[key]) + '\n')
                 continue
@@ -986,12 +1027,12 @@ while True:
                     'speed': cdist1s[round(speeds.p_dflns[i].centralpos)]})
             
             if settings['plot_figure']:
-                speeds.graph_dflns()
+                speeds.graph_dflns(10, f'{path}/{videoname}_speed.png')
             
             if not settings['spine_analysis']:
                 analyses.append(analysis)
                 print('Analysis of ' + videoname + ' complete.')
-                with open(path + '/' + videoname + '_analysis_notes.csv', 'w') as f:
+                with open(f'{path}/{videoname}_analysis_notes.csv', 'w') as f:
                     for key in settings:
                         f.write(key + ', ' + str(settings[key]) + '\n')
                 continue # step analysis when spine_analysis is disabled is not yet available
@@ -999,7 +1040,7 @@ while True:
             # load midline points data
             spine_len = metadata['spine_points']
             spines = [[[0, 0] for j in range(spine_len)] for i in range(l)]
-            with open(path + '/' + videoname + '_spine.csv', 'r') as f:
+            with open(f'{path}/{videoname}_spine.csv', 'r') as f:
                 spines_temp = [[cell for cell in row] for row in csv.reader(f)]
                 spines_temp.pop(0)
                 for i in range(l):
@@ -1009,7 +1050,7 @@ while True:
             
             s0s = [[0, 0] for i in range(l)]
             if settings['use_s0']:
-                with open(path + '/' + videoname + '_s0s.csv', 'r') as f:
+                with open(f'{path}/{videoname}_s0s.csv', 'r') as f:
                     s0s_temp = [[cell for cell in row] for row in csv.reader(f)]
                     s0s_temp.pop(0)
                     for i in range(l):
@@ -1105,12 +1146,12 @@ while True:
                     'error2_count': error2_count,
                     'error2_count_new': error2_count_new})
                 
-                with open(path + '/' + videoname + '_error2s.csv', 'w') as f:
+                with open(f'{path}/{videoname}_error2s.csv', 'w') as f:
                     f.write('Frame,Turn_nn,Turn_nn_corrected,Turn_12,Turn_12_corrected\n')
                     for i in range(l):
                         f.write(f'{i},{turns_nn[i]},{turns_nn_new[i]},{turns_12[i]},{turns_12_new[i]}\n')
                 
-                with open(path + '/' + videoname + '_spine_corrected.csv', 'w') as f:
+                with open(f'{path}/{videoname}_spine_corrected.csv', 'w') as f:
                     for i in range(l):
                         for j in range(spine_len):
                             f.write(f'{spines[i][j][0]},{spines[i][j][1]},')
@@ -1121,7 +1162,7 @@ while True:
                 error2s_all.append({
                     'videoname': videoname,
                     'error2_count': error2_count})
-                with open(path + '/' + videoname + '_error2s.csv', 'w') as f:
+                with open(f'{path}/{videoname}_error2s.csv', 'w') as f:
                     f.write('Frame,Turn_nn,Turn_12\n')
                     for i in range(l):
                         f.write(f'{i},{turns_nn[i]},{turns_12[i]}\n')
@@ -1144,7 +1185,7 @@ while True:
                         spine_lens[i] += 1
             
             heads = [0 for i in range(l)]
-            with open(path + '/' + videoname + '_sn+1s.csv', 'r') as f:
+            with open(f'{path}/{videoname}_sn+1s.csv', 'r') as f:
                 temp = [[cell for cell in row] for row in csv.reader(f)]
                 temp.pop(0)
                 for i in range(l):
@@ -1196,7 +1237,7 @@ while True:
             
             if settings['correct_errors']:
                 error_frames = []
-                with open(path + '/' + videoname + '_errors.csv', 'r') as f:
+                with open(f'{path}/{videoname}_errors.csv', 'r') as f:
                     for row in csv.reader(f):
                         for cell in row:
                             if cell.isnumeric():
@@ -1218,7 +1259,7 @@ while True:
             fdirs.merge_dflns()
             
             if settings['plot_figure']:
-                fdirs.graph_dflns()
+                fdirs.graph_dflns(max(fdirs.list) - min(fdirs.list), f'{path}/{videoname}_orient.png')
             
             for i in range(fdirs.dflns_count):
                 fdirs.dflns[i].dict.update({
@@ -1235,10 +1276,10 @@ while True:
             angles.get_n_dflns(settings['bend_cutoff'], -2, -2,
                                settings['min_bend_dur'], settings['min_bend_speed'], settings['min_bend_angle'])
             angles.merge_dflns()
-            '''
+            
             if settings['plot_figure']:
-                angles.graph_dflns()
-            '''
+                angles.graph_dflns(max(angles.list) - min(angles.list), f'{path}/{videoname}_angle.png')
+            
             angles_neutral = copy(angles.list)
             angles_neutral_count = l
             for d in angles.p_dflns:
@@ -1379,35 +1420,33 @@ while True:
             
             for i in range(fdirs.dflns_count):
                 
-                if fdirs.dflns[i].belong != -1:
-                    continue
+                if fdirs.dflns[i].belong == -1:
                 
-                candidates = []
-                scores = []
-                for j in range(angles.dflns_count):
-                    if angles.dflns[j].belong == -1:
-                        if angles.dflns[j].endpos >= fdirs.dflns[i].startpos and angles.dflns[j].startpos <= fdirs.dflns[i].endpos:
-                            candidates.append(j)
-                            scores.append(abs(angles.dflns[j].centralpos - fdirs.dflns[i].centralpos))
-                
-                if len(candidates) == 0:
-                    continue
-                
-                choice = candidates[scores.index(min(scores))]
-                s = step()
-                s.turns.append(fdirs.dflns[i])
-                fdirs.dflns[i].belong = fdirs.dflns[i].centralpos
-                s.bends.append(angles.dflns[choice])
-                angles.dflns[choice].belong = s.turns[0].centralpos
-                
-                steps.append(s)
+                    candidates = []
+                    scores = []
+                    for j in range(angles.dflns_count):
+                        if angles.dflns[j].belong == -1:
+                            if angles.dflns[j].endpos >= fdirs.dflns[i].startpos and angles.dflns[j].startpos <= fdirs.dflns[i].endpos:
+                                candidates.append(j)
+                                scores.append(abs(angles.dflns[j].centralpos - fdirs.dflns[i].centralpos))
+                    
+                    if len(candidates) == 0:
+                        continue
+                    
+                    choice = candidates[scores.index(min(scores))]
+                    s = step()
+                    s.turns.append(fdirs.dflns[i])
+                    fdirs.dflns[i].belong = fdirs.dflns[i].centralpos
+                    s.bends.append(angles.dflns[choice])
+                    angles.dflns[choice].belong = s.turns[0].centralpos
+                    steps.append(s)
             
             steps_count = len(steps)
             for i in range(steps_count):
                 if steps[i].accel != None:
                     steps[i].startpos = steps[i].accel.startpos
                     steps[i].coastpos = steps[i].accel.endpos
-                else:
+                elif len(steps[i].turns) >= 1:
                     steps[i].startpos = steps[i].turns[0].startpos
                     steps[i].coastpos = steps[i].turns[0].endpos
                 steps[i].centralpos = (steps[i].startpos + steps[i].coastpos) / 2
@@ -1446,6 +1485,7 @@ while True:
             
             if settings['plot_figure']:
                 fig, ax = plt.subplots() #step pairing graph
+                fig.set_size_inches(l / fps, 10)
                 speeds_scaled = [speed / fps for speed in speeds.list]
                 turns_scaled = [turn / fps for turn in fdirs.dt_curve.list]
                 ax.plot(speeds_scaled, 'c')
@@ -1464,7 +1504,9 @@ while True:
                         plot_data(ax, turns_scaled, turn.startpos, turn.endpos + 1, c)
                     for bend in s.bends:
                         plot_data(ax, angles.list, bend.startpos, bend.endpos + 1, c)
-            
+                fig.savefig(f'{path}/{videoname}_steps.png')
+                plt.close()
+                
             for s in steps:
                 
                 s.properties.update({
@@ -1690,8 +1732,26 @@ while True:
         steps_all_adjusted.to_csv('steps_all_adjusted.csv', index=False)
         analyses_df_adjusted.to_csv('analyses_df_adjusted.csv', index=False)
         print('All analyses complete.')
-
-        with pd.ExcelWriter('properties.xlsx') as writer:
+        
+        with pd.ExcelWriter('turns_properties.xlsx') as writer:
+            for i in fdirs_all.columns:
+                if i == 'video':
+                    continue
+                p = pd.DataFrame()
+                for videoname in videonames:
+                    p[videoname] = fdirs_all[fdirs_all['video'] == videoname][i]
+                p.to_excel(writer, sheet_name=i, index=False)
+        
+        with pd.ExcelWriter('bends_properties.xlsx') as writer:
+            for i in angles_all.columns:
+                if i == 'video':
+                    continue
+                p = pd.DataFrame()
+                for videoname in videonames:
+                    p[videoname] = angles_all[angles_all['video'] == videoname][i]
+                p.to_excel(writer, sheet_name=i, index=False)
+        
+        with pd.ExcelWriter('steps_properties.xlsx') as writer:
             for i in steps_all.columns:
                 if i == 'video':
                     continue
