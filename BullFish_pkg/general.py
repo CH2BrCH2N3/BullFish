@@ -1,7 +1,13 @@
 import csv
 import os
 from traceback import print_exc
-from sys import exit
+import sys
+from PyQt5.QtWidgets import QApplication, QFileDialog
+
+def getfilepath():
+    app = QApplication.instance() or QApplication(sys.argv)
+    file_path, _ = QFileDialog.getOpenFileName(None, "Open video")
+    return file_path
 
 def create_path(path):
     if not os.path.exists(path):
@@ -43,5 +49,5 @@ def load_settings(program, default_settings):
                 f.write(key + ',' + str(default_settings[key]) + '\n')
         print('settings_' + program + '.csv has been produced using default values.')
         if input('Enter e to exit the program to change settings, others to continue with default settings:') == 'e':
-            exit()
+            sys.exit()
         return default_settings
