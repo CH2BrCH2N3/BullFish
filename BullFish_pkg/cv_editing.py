@@ -2,6 +2,8 @@ import numpy as np
 import cv2 as cv
 from math import log10
 
+supported_formats = {'.avi', '.mp4', '.MOV'}
+
 def get_rm(x, y, angle):
     if angle > -180 and angle < -135:
         return cv.getRotationMatrix2D((x, y), -(angle + 180), 1.0)
@@ -101,6 +103,15 @@ def max_entropy_threshold(image, threshold_reduction):
             tmax = t
         t += 1
     return round(tmax * (1 - threshold_reduction / 100))
+
+def find_com(contour, output):
+    moment = cv.moments(contour)
+    if output == 'x':
+        return moment['m10'] / moment['m00']
+    elif output == 'y':
+        return moment['m01'] / moment['m00']
+    else:
+        return (moment['m10'] / moment['m00'], moment['m01'] / moment['m00'])
 
 def sq_area(image, point, r):
     sq = image[(point[1] - r):(point[1] + r + 1), (point[0] - r):(point[0] + r + 1)]
