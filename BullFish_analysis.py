@@ -43,7 +43,7 @@ default_settings = {
     "min_max_bend_velocity": 2,
     "min_bend_angle": 0.1,
     "min_bend_dur": 0.02,
-    "min_amp": 0.8}
+    "min_amp": 2}
 settings = load_settings('analysis', default_settings)
 
 sampling = settings['sampling']
@@ -61,9 +61,9 @@ metadata_track_all = []
 for _, metadata in metadata_all.iterrows():
     
     filepath = metadata['filepath']
-    print(f'\nProcessing {filepath}')
     p = Path(filepath)
     name = metadata['name']
+    print(f'\nProcessing {name}')
     subpath = f'{p.parent}/{name}'
     group = metadata['group']
     l = metadata['video_end'] - metadata['video_start']
@@ -401,7 +401,7 @@ for _, metadata in metadata_all.iterrows():
                 if j >= 1:
                     bend_poss[i] = sum(fish_segs[i][0:j]) / fish_lengths[i]
                 break
-    bend_poss = curve(bend_poss, 0, l, 3)
+    bend_poss = curve(bend_poss, 0, l, settings['bend_avg_window'])
     
     fish_length_med = float(pd.DataFrame(fish_lengths).median().iloc[0])
     analysis.update({'fish_length': fish_length_med})
