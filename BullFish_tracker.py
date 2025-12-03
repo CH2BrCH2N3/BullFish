@@ -418,20 +418,7 @@ for _, metadata in metadata_all.iterrows():
                         if contour1_points_sq[ii] < min_fish_area:
                             s1_index = ii
                             min_fish_area = contour1_points_sq[ii]
-                    '''
-                    fish_contour1_points = np.zeros((fish_perimeter1, 2), dtype=np.int32)
-                    fish_contour1_sq = np.zeros(fish_perimeter1, dtype=np.int32)
-                    jj = s1_index
-                    ii = 0
-                    while ii < fish_perimeter1:
-                        fish_contour1_points[ii, 0] = fish_contour1[jj, 0, 0]
-                        fish_contour1_points[ii, 1] = fish_contour1[jj, 0, 1]
-                        fish_contour1_sq[ii] = contour1_points_sq[jj]
-                        jj += 1
-                        ii += 1
-                        if jj >= fish_perimeter1:
-                            jj -= fish_perimeter1
-                    '''
+                    
                     fish_contour1_points = np.roll(fish_contour1[:, 0, :], -s1_index, axis=0).astype(np.int32)
                     fish_contour1_sq = np.roll(contour1_points_sq, -s1_index).astype(np.int32)
                     
