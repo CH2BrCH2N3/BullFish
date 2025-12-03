@@ -16,7 +16,7 @@ default_settings = {
     "ksize": 5,
     "t_sampling_time": 0.2,
     "threshold1_reduction": 10,
-    "save_edittedvideo": 0,
+    "save_editedvideo": 'MJPG',
     "save_binaryvideo": "FFV1",
     "save_annotatedvideo": "MJPG",
     "spine_analysis": 1,
@@ -317,8 +317,8 @@ for _, metadata in metadata_all.iterrows():
     
     try:
         
-        if settings['save_edittedvideo']:
-            c = settings['save_edittedvideo']
+        if settings['save_editedvideo']:
+            c = settings['save_editedvideo']
             edited = cv.VideoWriter(f'{subpath}/{name}_n.avi', cv.VideoWriter_fourcc(c[0], c[1], c[2], c[3]), fps, (x_current, y_current), 0)
         if settings['save_binaryvideo']:
             c = settings['save_binaryvideo']
@@ -360,7 +360,7 @@ for _, metadata in metadata_all.iterrows():
             try:
                 
                 frame_edited = frame_grc(frame, x_original, y_original, rotate, rm, crop_tlx, crop_tly, crop_x, crop_y)
-                if settings['save_edittedvideo']:
+                if settings['save_editedvideo']:
                     edited.write(frame_edited)
                 if settings['save_annotatedvideo']:
                     aframe = cv.cvtColor(frame_edited, cv.COLOR_GRAY2BGR)
@@ -418,27 +418,29 @@ for _, metadata in metadata_all.iterrows():
                         if contour1_points_sq[ii] < min_fish_area:
                             s1_index = ii
                             min_fish_area = contour1_points_sq[ii]
-                    
-                    fish_contour1_points = np.zeros((fish_perimeter1, 2), dtype=np.int32)    
+                    '''
+                    fish_contour1_points = np.zeros((fish_perimeter1, 2), dtype=np.int32)
+                    fish_contour1_sq = np.zeros(fish_perimeter1, dtype=np.int32)
                     jj = s1_index
                     ii = 0
                     while ii < fish_perimeter1:
                         fish_contour1_points[ii, 0] = fish_contour1[jj, 0, 0]
                         fish_contour1_points[ii, 1] = fish_contour1[jj, 0, 1]
+                        fish_contour1_sq[ii] = contour1_points_sq[jj]
                         jj += 1
                         ii += 1
                         if jj >= fish_perimeter1:
                             jj -= fish_perimeter1
+                    '''
+                    fish_contour1_points = np.roll(fish_contour1[:, 0, :], -s1_index, axis=0).astype(np.int32)
+                    fish_contour1_sq = np.roll(contour1_points_sq, -s1_index).astype(np.int32)
                     
-                    min_head_pos = []
-                    head_areas = []
-                    for ii in range(fish_perimeter1 // 4, fish_perimeter1 * 3 // 4, 2):
-                        head_areas.append(sq_area(s1frame, (fish_contour1_points[ii, 0], fish_contour1_points[ii, 1]), sq_length))
-                    head_area_cutoff = round(np.percentile(head_areas, 20))
-                    for ii in range(len(head_areas)):
-                        if head_areas[ii] <= head_area_cutoff:
-                            min_head_pos.append(ii)
-                    head_index = fish_perimeter1 // 4 + round(np.percentile(min_head_pos, 50)) * 2
+                    head_candidates = []
+                    head_area_cutoff = round(np.percentile(fish_contour1_sq[(fish_perimeter1 // 4):(fish_perimeter1 * 3 // 4)], 20))
+                    for ii in range(fish_perimeter1 // 4, fish_perimeter1 * 3 // 4):
+                        if fish_contour1_sq[ii] <= head_area_cutoff:
+                            head_candidates.append(ii)
+                    head_index = round(np.percentile(head_candidates, 50))
                     heads[i, 0] = fish_contour1_points[head_index, 0]
                     heads[i, 1] = fish_contour1_points[head_index, 1]
                     
@@ -559,7 +561,7 @@ for _, metadata in metadata_all.iterrows():
     
     print()
     video.release()
-    if settings['save_edittedvideo']:
+    if settings['save_editedvideo']:
         edited.release()
     if settings['save_binaryvideo']:
         binary1.release()
@@ -634,4 +636,4 @@ for _, metadata in metadata_all.iterrows():
     print(f'Tracking of {name} complete.')
 
 metadata_track_all = pd.DataFrame(metadata_track_all)
-metadata_track_all.to_csv('metadata_track.csv')
+metadata_track_all.to_csv('metadata_track.csv', index=False)
