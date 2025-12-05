@@ -1,7 +1,6 @@
 from pathlib import Path
 import csv
 import cv2 as cv
-import numpy as np
 import pandas as pd
 from math import sqrt, cos
 from copy import copy
@@ -25,12 +24,11 @@ default_settings = {
     "min_speed_change": 0,
     "min_accel_dur": 0.02,
     "spine_analysis": 1,
-    "spine_points": 10,
     'alternate_turn': 0,
     'use_s0': 0,
     'correct_errors': 0,
     'correction_window': 0.05,
-    'max_turn': 1.57,
+    'max_turn': 1,
     "turn_avg_window": 3,
     "turn_cutoff": 2,
     "min_turn_velocity": 0,
@@ -73,16 +71,18 @@ for _, metadata in metadata_all.iterrows():
     else:
         ratio = settings['tank_y'] / metadata['swimarea_y']
     
+    cens = [[0, 0] for i in range(l)]
     with open(f'{subpath}/{name}_cen.csv', 'r') as f:
-        cen = [[cell for cell in row] for row in csv.reader(f)]
-        cen.pop(0)
+        cens_temp = [[cell for cell in row] for row in csv.reader(f)]
+        cens_temp.pop(0)
         for i in range(l):
-            cen[i] = (float(cen[i][0]) * ratio, float(cen[i][1]) * ratio)
+            cens[i][0] = float(cens_temp[i][0])
+            cens[i][1] = float(cens_temp[i][1])
     
     cen_dists = [0 for i in range(l)] # obtain a list of speed at each frame
     speeds = [0 for i in range(l)]
     for i in range(sampling, l, sampling):
-        cen_dists[i] = pyth(cen[i], cen[i - sampling]) / sampling
+        cen_dists[i] = pyth((cens[i]), (cens[i - sampling])) / sampling * ratio
         speeds[i] = cen_dists[i] * fps
     for i in range(0, sampling):
         cen_dists[i] = cen_dists[sampling]
@@ -104,15 +104,18 @@ for _, metadata in metadata_all.iterrows():
     speed_avg = total_distance / total_time
     
     freeze = [0 for i in range(l)] # determine whether the fish is freezing for each frame
-    for i in range(int(fps * 3), l):
-        cdist1 = pyth(cen[int(i - fps * 2)], cen[int(i - fps * 3)])
-        cdist2 = pyth(cen[int(i - fps)], cen[int(i - fps * 2)])
-        cdist3 = pyth(cen[i], cen[int(i - fps)])
+    for i in range(round(fps * 3), l):
+        prev3 = round(i - fps * 3)
+        prev2 = round(i - fps * 2)
+        prev1 = round(i - fps)
+        cdist1 = pyth((cens[prev2][0], cens[prev2][1]), (cens[prev3][0], cens[prev3][1])) * ratio
+        cdist2 = pyth((cens[prev1][0], cens[prev1][1]), (cens[prev2][0], cens[prev2][1])) * ratio
+        cdist3 = pyth((cens[i][0], cens[i][1]), (cens[prev1][0], cens[prev1][1])) * ratio
         if cdist1 < 1 and cdist2 < 1 and cdist3 < 1:
-            for j in range(int(i - fps * 3 + 1), i + 1):
+            for j in range(prev3 + 1, i + 1):
                 freeze[j] = 1
         elif cdist1 > 1 and cdist2 > 1 and cdist3 > 1:
-            for j in range(int(i - fps * 2 + 1), i + 1):
+            for j in range(prev2 + 1, i + 1):
                 freeze[j] = 0
     
     total_freeze_time = sum(freeze) / fps
@@ -120,6 +123,8 @@ for _, metadata in metadata_all.iterrows():
     active_time = total_time - total_freeze_time
     active_speed = total_distance / active_time
     freeze_count = 0
+    if freeze[1] == 1:
+        freeze_count += 1
     for i in range(2, l):
         if freeze[i] - freeze[i - 1] == 1:
             freeze_count += 1
@@ -140,20 +145,20 @@ for _, metadata in metadata_all.iterrows():
     
     ds_from_wall = [0 for i in range(l)]
     thigmotaxis_time = 0
-    xl = metadata['swimarea_tlx'] * ratio
-    length = metadata['swimarea_x'] * ratio
+    xl = metadata['swimarea_tlx']
+    length = metadata['swimarea_x']
     xr = xl + length
-    yt = metadata['swimarea_tly'] * ratio
-    width = metadata['swimarea_y'] * ratio
+    yt = metadata['swimarea_tly']
+    width = metadata['swimarea_y']
     yb = yt + width
     d_from_wall = min(length, width) / 4
     for i in range(l):
-        x = min(cen[i][0] - xl, xr - cen[i][0])
-        y = min(cen[i][1] - yt, yb - cen[i][1])
+        x = min(cens[i][0] - xl, xr - cens[i][0])
+        y = min(cens[i][1] - yt, yb - cens[i][1])
         ds_from_wall[i] = min(x, y)
         if ds_from_wall[i] < d_from_wall:
             thigmotaxis_time += 1
-    thigmotaxis_time /= fps
+    thigmotaxis_percent = thigmotaxis_time / fps / total_time
     
     analysis = {
         'name': name,
@@ -166,12 +171,12 @@ for _, metadata in metadata_all.iterrows():
         'freeze_percent': freeze_percent,
         'freeze_count': freeze_count,
         'freeze_freq': freeze_freq,
-        'thigmotaxis_time': thigmotaxis_time}
+        'thigmotaxis_percent': thigmotaxis_percent}
     
     if settings['plot_figure']:
         create_path('Tracks')
         fig, ax = plt.subplots()
-        ax.scatter(x=[cen[i][0] for i in range(l)], y=[cen[i][1] for i in range(l)])
+        ax.scatter(x=[cens[i][0] for i in range(l)], y=[cens[i][1] for i in range(l)])
         fig.savefig(f'Tracks/{name}_track.png')
         plt.close()
     
@@ -211,15 +216,15 @@ for _, metadata in metadata_all.iterrows():
         continue # step analysis when spine_analysis is disabled is not yet available
     
     # load midline points data
-    spine_len = settings['spine_points']
-    spines = [[[0, 0] for j in range(spine_len)] for i in range(l)]
     with open(f'{subpath}/{name}_spine.csv', 'r') as f:
         spines_temp = [[cell for cell in row] for row in csv.reader(f)]
         spines_temp.pop(0)
+        spine_len = len(spines_temp[0]) // 2
+        spines = [[[0, 0] for j in range(spine_len)] for i in range(l)]
         for i in range(l):
             for j in range(spine_len):
-                spines[i][j][0] = float(spines_temp[i][j * 2]) * ratio
-                spines[i][j][1] = float(spines_temp[i][j * 2 + 1]) * ratio
+                spines[i][j][0] = float(spines_temp[i][j * 2])
+                spines[i][j][1] = float(spines_temp[i][j * 2 + 1])
     
     s0s = [[0, 0] for i in range(l)]
     if settings['use_s0']:
@@ -227,8 +232,8 @@ for _, metadata in metadata_all.iterrows():
             s0s_temp = [[cell for cell in row] for row in csv.reader(f)]
             s0s_temp.pop(0)
             for i in range(l):
-                s0s[i][0] = float(s0s_temp[i][0]) * ratio
-                s0s[i][1] = float(s0s_temp[i][1]) * ratio
+                s0s[i][0] = float(s0s_temp[i][0])
+                s0s[i][1] = float(s0s_temp[i][1])
     
     error2_pts = []
     dirs_nn = [0 for i in range(l)]
@@ -280,8 +285,8 @@ for _, metadata in metadata_all.iterrows():
                 if ret:
                     for jj in range(spine_len):
                         colorn = int(jj / spine_len * 255)
-                        cv.circle(frame, (round(spines[i + ii][jj][0] / ratio), round(spines[i + ii][jj][1] / ratio)), 3, (colorn, 255 - colorn // 2, 255 - colorn), -1)
-                    cv.imwrite(correct_frames_path + '/' + str(i + ii) + '.png', frame)
+                        cv.circle(frame, (round(spines[i + ii][jj][0]), round(spines[i + ii][jj][1])), 3, (colorn, 255 - colorn // 2, 255 - colorn), -1)
+                    cv.imwrite(f'{correct_frames_path}/{i + ii}.png', frame)
         video_n.release()
         
         error2_pts_new = []
@@ -360,48 +365,45 @@ for _, metadata in metadata_all.iterrows():
         temp = [[cell for cell in row] for row in csv.reader(f)]
         temp.pop(0)
         for i in range(l):
-            heads[i] = (float(temp[i][0]) * ratio, float(temp[i][1]) * ratio)
+            heads[i] = (float(temp[i][0]), float(temp[i][1]))
     
-    # calculate bend angles, amps
-    spine_angles = [[] for i in range(l)]
+    fish_segs = [[0 for j in range(spine_lens[i])] for i in range(l)]
+    for i in range(l):
+        for j in range(spine_lens[i] - 1):
+            fish_segs[i][j] = pyth(spines[i][j], spines[i][j + 1]) * ratio
+        fish_segs[i][spine_lens[i] - 1] = pyth(spines[i][spine_lens[i] - 1], heads[i]) * ratio
+    fish_lengths = [sum(fish_segs[i]) for i in range(l)]
+    
+    spine_angles = [[] for i in range(l)] # calculate bend angles
     angles = [0 for i in range(l)]
     for i in range(l):
-        # calculate direction from one midline point to another, caudal to cranial
-        spine_dirs = []
+        spine_dirs = [] # calculate direction from one midline point to another, caudal to cranial
         for j in range(1, spine_lens[i]):
             spine_dirs.append(cal_direction(spines[i][j - 1], spines[i][j]))
-        # calculate bend angles. left is +, right is -
-        for j in range(2, spine_lens[i]):
+        for j in range(2, spine_lens[i]): # calculate bend angles. left is +, right is -
             spine_angles[i].append(cal_direction_change(spine_dirs[j - 1], spine_dirs[j - 2]))
             angles[i] += spine_angles[i][j - 2]
     
+    bend_poss = [0 for i in range(l)]
     amps = [0 for i in range(l)]
     trunk_amps = [[0 for j in range(spine_lens[i] - 2)] for i in range(l)]
     for i in range(l):
         if spines[i][spine_lens[i] - 1][0] == spines[i][spine_lens[i] - 2][0]:
             for j in range(spine_lens[i] - 2):
-                trunk_amps[i][j] = abs(spines[i][j][0] - spines[i][spine_lens[i] - 1][0])
+                trunk_amps[i][j] = abs(spines[i][j][0] - spines[i][spine_lens[i] - 1][0]) * ratio
         else:
             m = (spines[i][spine_lens[i] - 1][1] - spines[i][spine_lens[i] - 2][1]) / (spines[i][spine_lens[i] - 1][0] - spines[i][spine_lens[i] - 2][0])
             c = spines[i][spine_lens[i] - 1][1] - m * spines[i][spine_lens[i] - 1][0]
             for j in range(spine_lens[i] - 2):
-                trunk_amps[i][j] = abs(m * spines[i][j][0] - spines[i][j][1] + c) / sqrt(m ** 2 + 1)
+                trunk_amps[i][j] = abs(m * spines[i][j][0] - spines[i][j][1] + c) / sqrt(m ** 2 + 1) * ratio
         amps[i] = trunk_amps[i][0]
-    
-    fish_segs = [[0 for j in range(spine_lens[i])] for i in range(l)]
-    for i in range(l):
-        for j in range(spine_lens[i] - 1):
-            fish_segs[i][j] = pyth(spines[i][j], spines[i][j + 1])
-        fish_segs[i][spine_lens[i] - 1] = pyth(spines[i][spine_lens[i] - 1], heads[i])
-    fish_lengths = [sum(fish_segs[i]) for i in range(l)]
-    bend_poss = [0 for i in range(l)]
     for i in range(l):
         for j in range(spine_lens[i] - 2):
             if trunk_amps[i][j] < settings['min_amp']:
                 if j >= 1:
                     bend_poss[i] = sum(fish_segs[i][0:j]) / fish_lengths[i]
                 break
-    bend_poss = curve(bend_poss, 0, l, settings['bend_avg_window'])
+    bend_poss = curve(bend_poss, 0, l, 0)
     
     fish_length_med = float(pd.DataFrame(fish_lengths).median().iloc[0])
     analysis.update({'fish_length': fish_length_med})
@@ -414,7 +416,6 @@ for _, metadata in metadata_all.iterrows():
                     if cell.isnumeric():
                         error_frames.append(int(cell))
         angles = errors_correct(angles, error_frames, l)
-        amps = errors_correct(amps, error_frames, l)
     
     fdirs = [0 for i in range(l)] # fdirs is a list of special running average of direction of locomotion
     fdirs[0] = directions[0]
@@ -924,10 +925,10 @@ with pd.ExcelWriter('bends_properties.xlsx') as writer:
         p.to_excel(writer, sheet_name=i, index=False)
 
 with pd.ExcelWriter('steps_properties.xlsx') as writer:
-    for i in steps_all.columns:
+    for i in steps_all_adjusted.columns:
         if i == 'name':
             continue
         p = pd.DataFrame()
         for name in names:
-            p[name] = steps_all[steps_all['name'] == name][i]
+            p[name] = steps_all_adjusted[steps_all_adjusted['name'] == name][i]
         p.to_excel(writer, sheet_name=i, index=False)
