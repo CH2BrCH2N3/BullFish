@@ -401,7 +401,7 @@ for _, metadata in metadata_all.iterrows():
         for j in range(spine_lens[i] - 2):
             if trunk_amps[i][j] < settings['min_amp']:
                 if j >= 1:
-                    bend_poss[i] = sum(fish_segs[i][0:j]) / fish_lengths[i]
+                    bend_poss[i] = sum(fish_segs[i][0:(j + 1)]) / fish_lengths[i]
                 break
     bend_poss = curve(bend_poss, 0, l, 0)
     
